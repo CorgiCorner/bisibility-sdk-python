@@ -4,7 +4,7 @@ from collections.abc import Mapping, Sequence
 from datetime import date, datetime
 from typing import Annotated, Any, Generic, Literal, TypeAlias, TypeVar
 
-from pydantic import AliasChoices, BaseModel, ConfigDict, Field
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field, field_validator
 
 JsonObject: TypeAlias = dict[str, Any]
 Device: TypeAlias = Literal["desktop", "mobile"]
@@ -165,7 +165,6 @@ class LocationSuggestion(BisibilityModel):
 
 
 class ProjectDefaults(BisibilityModel):
-    auto_schedule: bool
     city: str | None
     country: str
     cron_expression: str | None
@@ -176,12 +175,14 @@ class ProjectDefaults(BisibilityModel):
     location_key: str
     next_check_at: str | None
     project_id: str
+    serp_depth: Literal[10, 20, 50, 100]
+    serp_stop_on_match: bool
+    source: Literal["derived", "explicit", "fallback"]
     timezone: str
     updated_at: str | None = None
 
 
 class ProjectDefaultsPatch(BisibilityModel):
-    auto_schedule: bool | None = None
     city: str | None = None
     country: str | None = None
     cron_expression: str | None = None
@@ -189,6 +190,7 @@ class ProjectDefaultsPatch(BisibilityModel):
     frequency: RankCheckFrequency | None = None
     jitter_minutes: int | None = None
     location_key: str | None = None
+    serp_stop_on_match: bool | None = None
     timezone: str | None = None
 
 
@@ -258,7 +260,6 @@ class CreatedApiKey(ApiKey):
 
 
 class KeywordSchedule(BisibilityModel):
-    auto_schedule: bool
     cron_expression: str | None
     frequency: RankCheckFrequency
     jitter_minutes: int
@@ -367,11 +368,6 @@ class KeywordMetricsResponse(BisibilityModel):
 
 
 class KeywordScheduleInput(BisibilityModel):
-    auto_schedule: bool | None = Field(
-        default=None,
-        validation_alias=AliasChoices("auto_schedule", "autoSchedule"),
-        serialization_alias="autoSchedule",
-    )
     cron_expression: str | None = Field(
         validation_alias=AliasChoices("cron_expression", "cronExpression"),
         serialization_alias="cronExpression",
@@ -1000,6 +996,16 @@ class WebhookUpdateInput(BisibilityModel):
     enabled: bool | None = None
     hmac_secret: str | None = None
     url: str | None = None
+
+    @field_validator("hmac_secret")
+    @classmethod
+    def validate_hmac_secret(cls, value: str | None) -> str | None:
+        if value is None or not value.strip():
+            raise ValueError(
+                "hmac_secret must be a non-empty string when provided; "
+                "omit it to leave the secret unchanged"
+            )
+        return value
 
 
 class CloudImportJob(BisibilityModel):

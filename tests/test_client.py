@@ -31,6 +31,7 @@ from bisibility import (
     KeywordBulkInput,
     KeywordMetricsInput,
     KeywordResearchOptions,
+    KeywordSchedule,
     KeywordScheduleInput,
     ListKeywordsOptions,
     ListRankedKeywordSuggestionsOptions,
@@ -52,6 +53,7 @@ from bisibility import (
     SitemapMonitorPatch,
     UpdateKeywordInput,
     UpdateProjectInput,
+    WebhookUpdateInput,
     create_bisibility_client,
 )
 from bisibility import (
@@ -135,7 +137,6 @@ def webhook_resource(**overrides: Any) -> dict[str, Any]:
 
 def project_defaults(**overrides: Any) -> dict[str, Any]:
     return {
-        "auto_schedule": True,
         "city": None,
         "country": "United States",
         "cron_expression": None,
@@ -146,6 +147,9 @@ def project_defaults(**overrides: Any) -> dict[str, Any]:
         "location_key": "US",
         "next_check_at": "2026-01-05T00:00:00.000Z",
         "project_id": "prj_1",
+        "serp_depth": 100,
+        "serp_stop_on_match": True,
+        "source": "explicit",
         "timezone": "UTC",
         "updated_at": "2026-01-04T00:00:00.000Z",
         **overrides,
@@ -742,6 +746,56 @@ def test_mirrored_openapi_enums_accept_current_values_and_reject_provider_drift(
         CostEstimateOptions(keywords=10, provider="ga4")
 
 
+def test_project_defaults_and_keyword_schedule_models_match_openapi_field_sets() -> None:
+    assert set(ProjectDefaults.model_fields) == {
+        "city",
+        "country",
+        "cron_expression",
+        "device",
+        "frequency",
+        "jitter_minutes",
+        "last_checked_at",
+        "location_key",
+        "next_check_at",
+        "project_id",
+        "serp_depth",
+        "serp_stop_on_match",
+        "source",
+        "timezone",
+        "updated_at",
+    }
+    assert set(ProjectDefaultsPatch.model_fields) == {
+        "city",
+        "country",
+        "cron_expression",
+        "device",
+        "frequency",
+        "jitter_minutes",
+        "location_key",
+        "serp_stop_on_match",
+        "timezone",
+    }
+    assert set(KeywordSchedule.model_fields) == {
+        "cron_expression",
+        "frequency",
+        "jitter_minutes",
+        "last_checked_at",
+        "next_check_at",
+        "timezone",
+    }
+    assert set(KeywordScheduleInput.model_fields) == {
+        "cron_expression",
+        "frequency",
+        "jitter_minutes",
+        "timezone",
+    }
+
+
+def test_project_defaults_rejects_unknown_source() -> None:
+    with pytest.raises(ValidationError):
+        ProjectDefaults.model_validate(project_defaults(source="guessed"))
+
+
 def test_sends_bearer_auth_and_default_headers_on_protected_requests() -> None:
     queue = QueueTransport([json_response(list_response([project()]))])
     client = make_client(queue, headers={"X-Client": "sdk-test"})
@@ -755,8 +809,8 @@ def test_sends_bearer_auth_and_default_headers_on_protected_requests() -> None:
     assert request.headers["Authorization"] == f"Bearer {API_KEY}"
     assert request.headers["X-Client"] == "sdk-test"
     assert request.headers["X-Request"] == "request"
-    assert request.headers["User-Agent"] == "bisibility-sdk-python/0.1.0"
-    assert request.headers["X-Bisibility-Client"] == "bisibility-sdk-python/0.1.0"
+    assert request.headers["User-Agent"] == "bisibility-sdk-python/0.2.0"
+    assert request.headers["X-Bisibility-Client"] == "bisibility-sdk-python/0.2.0"
     assert request.extensions["timeout"] == {
         "connect": 30.0,
         "read": 30.0,
@@ -773,7 +827,7 @@ def test_preserves_user_agent_and_allows_disabling_timeout() -> None:
 
     request = queue.requests[-1]
     assert request.headers["User-Agent"] == "my-app/1.0"
-    assert request.headers["X-Bisibility-Client"] == "bisibility-sdk-python/0.1.0"
+    assert request.headers["X-Bisibility-Client"] == "bisibility-sdk-python/0.2.0"
     assert request.extensions["timeout"] == {
         "connect": None,
         "read": None,
@@ -1051,6 +1105,33 @@ def test_project_api_keys_and_webhook_crud() -> None:
     ]
 
 
+@pytest.mark.parametrize("hmac_secret", [None, "", "   "])
+def test_webhook_update_rejects_null_or_blank_hmac_secret(
+    hmac_secret: str | None,
+) -> None:
+    with pytest.raises(
+        ValidationError,
+        match="hmac_secret must be a non-empty string when provided",
+    ):
+        WebhookUpdateInput(hmac_secret=hmac_secret)
+
+
+def test_webhook_update_accepts_non_empty_hmac_secret() -> None:
+    update = WebhookUpdateInput(hmac_secret="rotated-secret")
+
+    assert update.model_dump(exclude_unset=True) == {"hmac_secret": "rotated-secret"}
+
+
+def test_webhook_update_omits_unset_hmac_secret_from_request_body() -> None:
+    queue = QueueTransport([json_response(webhook_resource(enabled=False))])
+    client = make_client(queue)
+
+    update = WebhookUpdateInput(enabled=False)
+    assert client.update_webhook("prj_1", "wh_1", update).enabled is False
+
+    assert request_json(queue.requests[0]) == {"enabled": False}
+
+
 def test_project_exposes_write_mode() -> None:
     queue = QueueTransport(
         [
@@ -1116,6 +1197,52 @@ def test_updates_project_defaults() -> None:
         "timezone": "UTC",
     }
     assert request_json(queue.requests[1]) == {"location_key": "US/Texas/Austin"}
+
+
+def test_gets_project_defaults() -> None:
+    response = project_defaults(
+        city="Austin",
+        last_checked_at="2026-01-03T00:00:00.000Z",
+        location_key="US/Texas/Austin",
+        serp_depth=50,
+        serp_stop_on_match=False,
+        source="explicit",
+    )
+    queue = QueueTransport([json_response(response)])
+    client = make_client(queue)
+
+    defaults = client.get_project_defaults("prj spaced/1")
+
+    assert defaults.model_dump() == response
+    assert defaults.source == "explicit"
+    assert queue.requests[0].method == "GET"
+    assert (
+        str(queue.requests[0].url)
+        == "https://api.test/api/v1/projects/prj%20spaced%2F1/defaults"
+    )
+
+
+def test_get_project_defaults_maps_forbidden() -> None:
+    problem = {
+        "detail": "API key scope does not allow this operation.",
+        "status": 403,
+        "title": "Forbidden",
+        "type": "https://bisibility.dev/problems/forbidden",
+    }
+    queue = QueueTransport(
+        [json_response(problem, 403, {"Content-Type": "application/problem+json"})]
+    )
+    client = make_client(queue)
+
+    with pytest.raises(BisibilityApiError) as exc_info:
+        client.get_project_defaults("prj_1")
+
+    assert exc_info.value.status == 403
+    assert exc_info.value.problem is not None
+    assert exc_info.value.problem.title == "Forbidden"
+    assert (
+        exc_info.value.url == "https://api.test/api/v1/projects/prj_1/defaults"
+    )
 
 
 def test_lists_creates_and_revokes_api_keys() -> None:

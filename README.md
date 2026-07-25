@@ -168,6 +168,13 @@ Iterators are available for keywords, rank checks, signals, API keys (including
 project API keys), webhooks, alert rules, triggered alerts, team members, team
 invites, providers, saved views, competitors, and migration tokens.
 
+### Webhook secret rotation
+
+To rotate a webhook secret, set `hmac_secret` on `WebhookUpdateInput` to a
+non-empty string. Sending a null, empty, or whitespace-only secret is rejected.
+Omit `hmac_secret` entirely to leave the existing secret unchanged; omitted
+fields are not included in the PATCH request.
+
 All SDK-defined exceptions derive from `BisibilityError`. `BisibilityApiError`
 also exposes `is_rate_limit`, `is_not_found`, and `retry_after_seconds` helpers.
 Problem responses follow RFC 9457 and preserve extension members; sensitive

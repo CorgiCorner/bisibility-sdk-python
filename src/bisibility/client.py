@@ -146,7 +146,7 @@ _MISSING = object()
 try:
     SDK_VERSION = version("bisibility")
 except PackageNotFoundError:  # pragma: no cover - source tree without installed metadata
-    SDK_VERSION = "0.1.0"
+    SDK_VERSION = "0.2.0"
 CLIENT_ID = f"bisibility-sdk-python/{SDK_VERSION}"
 
 
@@ -576,6 +576,19 @@ class BisibilityClient:
             request_options=request_options,
         )
 
+    def get_project_defaults(
+        self,
+        project_id: str,
+        request_options: RequestOptionsLike = None,
+    ) -> ProjectDefaults:
+        """Get project-level keyword defaults via GET /projects/{id}/defaults."""
+        return self._request(
+            "GET",
+            f"/projects/{_encoded_path_segment(project_id)}/defaults",
+            response_model=ProjectDefaults,
+            request_options=request_options,
+        )
+
     def update_project_defaults(
         self,
         project_id: str,
@@ -585,9 +598,9 @@ class BisibilityClient:
         """Update project-level keyword defaults via PATCH /projects/{id}/defaults.
 
         Accepts schedule fields (``frequency``, ``cron_expression``, ``timezone``,
-        ``jitter_minutes``, ``auto_schedule``) plus default-market selectors.
-        When ``location_key`` is omitted, ``country`` and ``device`` must be
-        provided together.
+        ``jitter_minutes``), ``serp_stop_on_match``, and default-market selectors.
+        When ``location_key`` is omitted, ``country`` and ``device`` must be provided
+        together.
         """
         return self._request(
             "PATCH",
