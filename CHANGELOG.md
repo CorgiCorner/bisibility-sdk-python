@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+## 0.2.1 - 2026-07-26
+
+- No library changes. The package contents are identical to `0.2.0`; this release carries the
+  PyPI publication workflow into the release snapshot so the project can be published.
+
 ## 0.2.0 - 2026-07-26
 
 - Added `get_project_defaults` to read the effective default market and schedule settings for a project.

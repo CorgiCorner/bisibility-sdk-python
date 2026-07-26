@@ -809,8 +809,8 @@ def test_sends_bearer_auth_and_default_headers_on_protected_requests() -> None:
     assert request.headers["Authorization"] == f"Bearer {API_KEY}"
     assert request.headers["X-Client"] == "sdk-test"
     assert request.headers["X-Request"] == "request"
-    assert request.headers["User-Agent"] == "bisibility-sdk-python/0.2.0"
-    assert request.headers["X-Bisibility-Client"] == "bisibility-sdk-python/0.2.0"
+    assert request.headers["User-Agent"] == "bisibility-sdk-python/0.2.1"
+    assert request.headers["X-Bisibility-Client"] == "bisibility-sdk-python/0.2.1"
     assert request.extensions["timeout"] == {
         "connect": 30.0,
         "read": 30.0,
@@ -827,7 +827,7 @@ def test_preserves_user_agent_and_allows_disabling_timeout() -> None:
 
     request = queue.requests[-1]
     assert request.headers["User-Agent"] == "my-app/1.0"
-    assert request.headers["X-Bisibility-Client"] == "bisibility-sdk-python/0.2.0"
+    assert request.headers["X-Bisibility-Client"] == "bisibility-sdk-python/0.2.1"
     assert request.extensions["timeout"] == {
         "connect": None,
         "read": None,
