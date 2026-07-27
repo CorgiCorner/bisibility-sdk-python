@@ -12,6 +12,7 @@ from pydantic import ValidationError
 from bisibility import (
     AddCompetitorInput,
     AlertRuleInput,
+    AnalyzeBacklinksOptions,
     ApiKeyCreateInput,
     BisibilityApiError,
     BisibilityClient,
@@ -29,6 +30,11 @@ from bisibility import (
     CreateSignalInput,
     CreateTeamInviteInput,
     KeywordBulkInput,
+    KeywordMatch,
+    KeywordMatchMarket,
+    KeywordMatchMeta,
+    KeywordMatchRequest,
+    KeywordMatchResponse,
     KeywordMetricsInput,
     KeywordResearchOptions,
     KeywordSchedule,
@@ -38,11 +44,15 @@ from bisibility import (
     ListSearchPerformanceQueryStatsOptions,
     ListSignalsOptions,
     ListTrafficSnapshotsOptions,
+    LoadMoreBacklinkRowsOptions,
     MintMigrationTokenInput,
     NotificationPreferencesPatch,
+    PositionDistributionBucket,
     Project,
     ProjectDefaults,
     ProjectDefaultsPatch,
+    ProjectOverview,
+    ProjectOverviewOptions,
     ProviderCredentialsInput,
     RankHistoryExportOptions,
     RequestOptions,
@@ -152,6 +162,51 @@ def project_defaults(**overrides: Any) -> dict[str, Any]:
         "source": "explicit",
         "timezone": "UTC",
         "updated_at": "2026-01-04T00:00:00.000Z",
+        **overrides,
+    }
+
+
+def project_overview(**overrides: Any) -> dict[str, Any]:
+    return {
+        "average_position": 12.5,
+        "average_position_delta": -1.25,
+        "keywords_added_this_month": 3,
+        "last_check_at": "2026-07-25T08:00:00.000Z",
+        "next_check_at": "2026-07-28T08:00:00.000Z",
+        "position_distribution": [
+            {"count": 4, "max": 3, "min": 1},
+            {"count": None, "max": 10, "min": 4},
+        ],
+        "project_id": "prj_1",
+        "top_10_count": 8,
+        "top_10_delta": 2,
+        "top_100_count": 17,
+        "top_3_count": 4,
+        "tracked_keyword_count": 20,
+        "visibility": 42.5,
+        "visibility_delta": 1.5,
+        **overrides,
+    }
+
+
+def keyword_match_response(**overrides: Any) -> dict[str, Any]:
+    return {
+        "data": [
+            {
+                "keyword_id": "kw_1",
+                "latest_position": 3,
+                "previous_position": None,
+                "matched_text": "headless cms",
+                "text": " Headless CMS ",
+                "market": {
+                    "location": "Austin, Texas, United States",
+                    "location_key": "US/Texas/Austin",
+                    "country_code": "US",
+                    "device": "desktop",
+                },
+            }
+        ],
+        "meta": {"truncated_texts": ["headless cms"]},
         **overrides,
     }
 
@@ -577,6 +632,59 @@ def request_json(request: httpx.Request) -> Any:
     return httpx.Response(200, request=request, content=request.content).json()
 
 
+def backlinks_snapshot(**overrides: Any) -> dict[str, Any]:
+    return {
+        "cached": False,
+        "cached_until": "2026-07-25T15:00:00Z",
+        "cost_cents": 5,
+        "fetched_at": "2026-07-24T15:00:00Z",
+        "fetched_row_count": 100,
+        "history": [
+            {"lost_links": index, "month": f"2025-{index:02d}", "new_links": index + 1}
+            for index in range(1, 9)
+        ]
+        + [
+            {"lost_links": index, "month": f"2026-{index:02d}", "new_links": index + 1}
+            for index in range(1, 5)
+        ],
+        "include_subdomains": True,
+        "provider": "dataforseo",
+        "rows": [
+            {
+                "anchor": "acme-store.com",
+                "domain_authority": 91,
+                "first_seen": "2026-01-21",
+                "flags": ["nofollow", "ugc"],
+                "links_count": 6,
+                "lost_at": None,
+                "source_domain": "reddit.com",
+                "source_url": "https://reddit.com/r/example",
+                "spam_score": 2.0,
+                "status": "active",
+                "target_url": "https://acme-store.com/",
+            }
+        ],
+        "summary": {
+            "backlinks_total": 1685,
+            "broken_backlinks": 0,
+            "broken_pages": 0,
+            "dofollow_pct": 61,
+            "domain_rank": 37,
+            "lost_backlinks": 12,
+            "lost_referring_domains": 1,
+            "new_backlinks": 34,
+            "new_referring_domains": 3,
+            "referring_domains_total": 48,
+            "referring_pages": 1422,
+            "spam_score": 3.0,
+        },
+        "target": "acme-store.com",
+        "target_scope": "site",
+        "total_rows_available": 1685,
+        **overrides,
+    }
+
+
 def test_discovery_methods_do_not_require_auth() -> None:
     capability = {
         "description": "Add one or more keywords",
@@ -809,8 +917,8 @@ def test_sends_bearer_auth_and_default_headers_on_protected_requests() -> None:
     assert request.headers["Authorization"] == f"Bearer {API_KEY}"
     assert request.headers["X-Client"] == "sdk-test"
     assert request.headers["X-Request"] == "request"
-    assert request.headers["User-Agent"] == "bisibility-sdk-python/0.2.1"
-    assert request.headers["X-Bisibility-Client"] == "bisibility-sdk-python/0.2.1"
+    assert request.headers["User-Agent"] == "bisibility-sdk-python/0.3.0"
+    assert request.headers["X-Bisibility-Client"] == "bisibility-sdk-python/0.3.0"
     assert request.extensions["timeout"] == {
         "connect": 30.0,
         "read": 30.0,
@@ -827,7 +935,7 @@ def test_preserves_user_agent_and_allows_disabling_timeout() -> None:
 
     request = queue.requests[-1]
     assert request.headers["User-Agent"] == "my-app/1.0"
-    assert request.headers["X-Bisibility-Client"] == "bisibility-sdk-python/0.2.1"
+    assert request.headers["X-Bisibility-Client"] == "bisibility-sdk-python/0.3.0"
     assert request.extensions["timeout"] == {
         "connect": None,
         "read": None,
@@ -1245,6 +1353,154 @@ def test_get_project_defaults_maps_forbidden() -> None:
     )
 
 
+def test_gets_project_overview_with_filters_and_preserves_null_metrics() -> None:
+    response = project_overview(
+        average_position=None,
+        average_position_delta=None,
+        last_check_at=None,
+        next_check_at=None,
+        top_10_count=0,
+        top_10_delta=None,
+        top_100_count=0,
+        top_3_count=0,
+        visibility=None,
+        visibility_delta=None,
+    )
+    queue = QueueTransport([json_response(response)])
+    client = make_client(queue)
+
+    overview = client.get_project_overview(
+        "prj spaced/1",
+        ProjectOverviewOptions(range="90d", device="mobile", tag="Priority tag"),
+    )
+
+    assert overview.model_dump() == response
+    assert overview.top_10_count == 0
+    assert overview.average_position is None
+    assert overview.position_distribution[1].count is None
+    assert queue.requests[0].method == "GET"
+    assert (
+        str(queue.requests[0].url)
+        == "https://api.test/api/v1/projects/prj%20spaced%2F1/overview?range=90d&device=mobile&tag=Priority+tag"
+    )
+
+
+def test_project_overview_models_match_openapi_field_sets() -> None:
+    assert set(ProjectOverview.model_fields) == {
+        "average_position",
+        "average_position_delta",
+        "keywords_added_this_month",
+        "last_check_at",
+        "next_check_at",
+        "position_distribution",
+        "project_id",
+        "top_10_count",
+        "top_10_delta",
+        "top_100_count",
+        "top_3_count",
+        "tracked_keyword_count",
+        "visibility",
+        "visibility_delta",
+    }
+    assert set(PositionDistributionBucket.model_fields) == {"count", "max", "min"}
+    assert set(ProjectOverviewOptions.model_fields) == {"device", "range", "tag"}
+
+
+def test_get_project_overview_maps_forbidden() -> None:
+    problem = {
+        "detail": "API key scope does not allow this operation.",
+        "status": 403,
+        "title": "Forbidden",
+        "type": "https://bisibility.dev/problems/forbidden",
+    }
+    queue = QueueTransport(
+        [json_response(problem, 403, {"Content-Type": "application/problem+json"})]
+    )
+    client = make_client(queue)
+
+    with pytest.raises(BisibilityApiError) as exc_info:
+        client.get_project_overview("prj_1")
+
+    assert exc_info.value.status == 403
+    assert exc_info.value.problem is not None
+    assert exc_info.value.problem.title == "Forbidden"
+
+
+def test_matches_project_keywords_and_preserves_request_and_stored_texts() -> None:
+    response = keyword_match_response()
+    queue = QueueTransport([json_response(response)])
+    client = make_client(queue)
+
+    matches = client.match_project_keywords(
+        "prj spaced/1",
+        KeywordMatchRequest(texts=[" Headless CMS ", "Python SDK"]),
+    )
+
+    assert matches.model_dump() == response
+    assert matches.data[0].matched_text == "headless cms"
+    assert matches.data[0].text == " Headless CMS "
+    assert matches.data[0].latest_position == 3
+    assert matches.data[0].previous_position is None
+    assert matches.data[0].market.device == "desktop"
+    assert matches.meta.truncated_texts == ["headless cms"]
+    assert queue.requests[0].method == "POST"
+    assert (
+        str(queue.requests[0].url)
+        == "https://api.test/api/v1/projects/prj%20spaced%2F1/keyword-matches"
+    )
+    assert request_json(queue.requests[0]) == {"texts": [" Headless CMS ", "Python SDK"]}
+
+
+def test_keyword_match_models_match_openapi_field_sets() -> None:
+    assert set(KeywordMatchRequest.model_fields) == {"texts"}
+    assert set(KeywordMatchResponse.model_fields) == {"data", "meta"}
+    assert set(KeywordMatch.model_fields) == {
+        "keyword_id",
+        "latest_position",
+        "market",
+        "matched_text",
+        "previous_position",
+        "text",
+    }
+    assert set(KeywordMatchMarket.model_fields) == {
+        "country_code",
+        "device",
+        "location",
+        "location_key",
+    }
+    assert set(KeywordMatchMeta.model_fields) == {"truncated_texts"}
+    assert (
+        KeywordMatch.model_fields["matched_text"].description
+        == "Trimmed, lowercase request text used to match this keyword."
+    )
+    assert KeywordMatch.model_fields["text"].description == (
+        "Stored keyword text, which can differ from matched_text in case and whitespace."
+    )
+    assert KeywordMatchMeta.model_fields["truncated_texts"].description == (
+        "Normalized texts with more than 100 matching markets. Their returned rows are partial."
+    )
+
+
+def test_match_project_keywords_maps_forbidden() -> None:
+    problem = {
+        "detail": "API key scope does not allow this operation.",
+        "status": 403,
+        "title": "Forbidden",
+        "type": "https://bisibility.dev/problems/forbidden",
+    }
+    queue = QueueTransport(
+        [json_response(problem, 403, {"Content-Type": "application/problem+json"})]
+    )
+    client = make_client(queue)
+
+    with pytest.raises(BisibilityApiError) as exc_info:
+        client.match_project_keywords("prj_1", {"texts": ["headless cms"]})
+
+    assert exc_info.value.status == 403
+    assert exc_info.value.problem is not None
+    assert exc_info.value.problem.title == "Forbidden"
+
+
 def test_lists_creates_and_revokes_api_keys() -> None:
     created = {
         **api_key_resource(id="key_new", name="CI"),
@@ -1540,6 +1796,89 @@ def test_maps_keyword_research_estimate_response() -> None:
     assert str(queue.requests[-1].url).endswith(
         "/projects/prj_1/keyword-research?estimate_only=true&seed=rank+tracker"
     )
+
+
+def test_analyzes_backlinks_with_all_query_options() -> None:
+    queue = QueueTransport([json_response({"data": backlinks_snapshot()})])
+    client = make_client(queue)
+
+    result = client.analyze_backlinks(
+        "proj_1",
+        AnalyzeBacklinksOptions(
+            target="acme-store.com",
+            target_scope="site",
+            include_subdomains=True,
+            result_limit=1000,
+            mode="one_per_domain",
+            estimate_only=False,
+            fresh=True,
+            max_cost_cents=9,
+        ),
+    )
+
+    assert result.data.summary.backlinks_total == 1685
+    assert result.data.rows[0].flags == ["nofollow", "ugc"]
+    assert result.data.rows[0].domain_authority == 91
+    assert result.data.rows[0].spam_score == 2.0
+    assert result.data.rows[0].links_count == 6
+    assert result.data.rows[0].first_seen.isoformat() == "2026-01-21"
+    assert result.data.rows[0].lost_at is None
+    assert result.data.rows[0].status == "active"
+    assert str(queue.requests[-1].url) == (
+        "https://api.test/api/v1/projects/proj_1/backlinks?"
+        "target=acme-store.com&target_scope=site&include_subdomains=true&result_limit=1000&"
+        "mode=one_per_domain&estimate_only=false&fresh=true&max_cost_cents=9"
+    )
+
+
+def test_analyze_backlinks_omits_unspecified_query_options() -> None:
+    queue = QueueTransport([json_response({"data": backlinks_snapshot()})])
+    client = make_client(queue)
+
+    client.analyze_backlinks("proj_1", AnalyzeBacklinksOptions(target="acme-store.com"))
+
+    assert str(queue.requests[-1].url) == (
+        "https://api.test/api/v1/projects/proj_1/backlinks?target=acme-store.com"
+    )
+
+
+def test_loads_more_backlink_rows_with_snake_case_body() -> None:
+    queue = QueueTransport(
+        [
+            json_response(
+                {
+                    "data": backlinks_snapshot(
+                        cost_cents=1,
+                        fetched_row_count=200,
+                    )
+                }
+            )
+        ]
+    )
+    client = make_client(queue)
+
+    result = client.load_more_backlink_rows(
+        "proj_1",
+        LoadMoreBacklinkRowsOptions(
+            target="acme-store.com",
+            target_scope="site",
+            include_subdomains=True,
+            limit=100,
+        ),
+    )
+
+    assert result.data.cost_cents == 1
+    assert result.data.fetched_row_count == 200
+    assert queue.requests[-1].method == "POST"
+    assert str(queue.requests[-1].url) == (
+        "https://api.test/api/v1/projects/proj_1/backlinks/rows"
+    )
+    assert request_json(queue.requests[-1]) == {
+        "target": "acme-store.com",
+        "target_scope": "site",
+        "include_subdomains": True,
+        "limit": 100,
+    }
 
 
 def test_gets_keyword_metrics_with_body_options_and_cached_counts() -> None:

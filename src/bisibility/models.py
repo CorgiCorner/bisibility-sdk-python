@@ -34,6 +34,8 @@ RankHistoryExportFormat: TypeAlias = Literal["csv", "json"]
 RankHistoryGranularity: TypeAlias = Literal["daily", "weekly"]
 RankHistoryRange: TypeAlias = Literal["30", "90", "all"]
 ProjectWriteMode: TypeAlias = Literal["active", "migration_hold", "migrated"]
+ProjectOverviewDevice: TypeAlias = Literal["all", "desktop", "mobile"]
+ProjectOverviewRange: TypeAlias = Literal["7d", "28d", "90d"]
 TrackingScope: TypeAlias = Literal["city", "country"]
 PersonalAccessTokenScope: TypeAlias = Literal["admin", "read", "write"]
 TeamInviteRole: TypeAlias = Literal["admin", "member", "viewer"]
@@ -194,6 +196,35 @@ class ProjectDefaultsPatch(BisibilityModel):
     timezone: str | None = None
 
 
+class PositionDistributionBucket(BisibilityModel):
+    count: int | None = Field(ge=0)
+    max: int = Field(ge=1)
+    min: int = Field(ge=1)
+
+
+class ProjectOverview(BisibilityModel):
+    average_position: float | None
+    average_position_delta: float | None
+    keywords_added_this_month: int = Field(ge=0)
+    last_check_at: str | None
+    next_check_at: str | None
+    position_distribution: list[PositionDistributionBucket]
+    project_id: str
+    top_10_count: int | None = Field(ge=0)
+    top_10_delta: int | None
+    top_100_count: int | None = Field(ge=0)
+    top_3_count: int | None = Field(ge=0)
+    tracked_keyword_count: int = Field(ge=0)
+    visibility: float | None = Field(ge=0, le=100)
+    visibility_delta: float | None
+
+
+class ProjectOverviewOptions(BisibilityModel):
+    device: ProjectOverviewDevice | None = None
+    range: ProjectOverviewRange | None = None
+    tag: str | None = Field(default=None, max_length=48)
+
+
 class CreateProjectInput(BisibilityModel):
     defaults: ProjectDefaultsPatch | None = None
     domain: str
@@ -287,6 +318,49 @@ class Keyword(BisibilityModel):
     updated_at: str
 
 
+class KeywordMatchRequest(BisibilityModel):
+    texts: list[Annotated[str, Field(min_length=1, max_length=180)]] = Field(
+        min_length=1, max_length=50
+    )
+
+
+class KeywordMatchMarket(BisibilityModel):
+    country_code: str
+    device: Device
+    location: str
+    location_key: str
+
+
+class KeywordMatch(BisibilityModel):
+    keyword_id: str
+    latest_position: int | None
+    market: KeywordMatchMarket
+    matched_text: str = Field(
+        description="Trimmed, lowercase request text used to match this keyword."
+    )
+    previous_position: int | None
+    text: str = Field(
+        description=(
+            "Stored keyword text, which can differ from matched_text "
+            "in case and whitespace."
+        )
+    )
+
+
+class KeywordMatchMeta(BisibilityModel):
+    truncated_texts: list[str] = Field(
+        description=(
+            "Normalized texts with more than 100 matching markets. "
+            "Their returned rows are partial."
+        )
+    )
+
+
+class KeywordMatchResponse(BisibilityModel):
+    data: list[KeywordMatch]
+    meta: KeywordMatchMeta
+
+
 class RankedKeywordConnection(BisibilityModel):
     id: str
     label: str
@@ -351,6 +425,59 @@ class KeywordResearchResponse(BisibilityModel):
     rows: list[KeywordResearchRow]
     sources: list[KeywordResearchSourceResult]
     total_count: int = Field(ge=0)
+
+
+class BacklinksSummary(BisibilityModel):
+    backlinks_total: int = Field(ge=0)
+    broken_backlinks: int = Field(ge=0)
+    broken_pages: int = Field(ge=0)
+    dofollow_pct: float = Field(ge=0, le=100)
+    domain_rank: int = Field(ge=0, le=100)
+    lost_backlinks: int = Field(ge=0)
+    lost_referring_domains: int = Field(ge=0)
+    new_backlinks: int = Field(ge=0)
+    new_referring_domains: int = Field(ge=0)
+    referring_domains_total: int = Field(ge=0)
+    referring_pages: int = Field(ge=0)
+    spam_score: float = Field(ge=0)
+
+
+class BacklinksHistoryMonth(BisibilityModel):
+    lost_links: int = Field(ge=0)
+    month: str = Field(pattern=r"^\d{4}-(0[1-9]|1[0-2])$")
+    new_links: int = Field(ge=0)
+
+
+class BacklinkRow(BisibilityModel):
+    anchor: str
+    domain_authority: int = Field(ge=0, le=100)
+    first_seen: date
+    flags: list[str]
+    links_count: int = Field(ge=0)
+    lost_at: date | None
+    source_domain: str
+    source_url: str
+    spam_score: float = Field(ge=0)
+    status: Literal["active", "new", "lost"]
+    target_url: str
+
+
+class BacklinksSnapshot(BisibilityModel):
+    cached: bool
+    cached_until: str
+    cost_cents: float = Field(ge=0)
+    estimate: bool | None = None
+    estimated_cost_cents: float | None = Field(default=None, ge=0)
+    fetched_at: str
+    fetched_row_count: int = Field(ge=0)
+    history: list[BacklinksHistoryMonth] = Field(min_length=12, max_length=12)
+    include_subdomains: bool
+    provider: str
+    rows: list[BacklinkRow]
+    summary: BacklinksSummary
+    target: str
+    target_scope: Literal["site", "page"]
+    total_rows_available: int = Field(ge=0)
 
 
 class KeywordMetricsResponse(BisibilityModel):
@@ -1224,6 +1351,24 @@ class KeywordResearchOptions(BisibilityModel):
     max_cost_cents: int | None = Field(default=None, ge=1)
     mode: KeywordResearchMode | None = None
     result_limit: Literal[100, 300, 500] | None = None
+
+
+class AnalyzeBacklinksOptions(BisibilityModel):
+    target: str
+    target_scope: Literal["site", "page"] | None = None
+    include_subdomains: bool | None = None
+    result_limit: Literal[100, 300, 500, 1000] | None = None
+    mode: Literal["as_is", "one_per_domain"] | None = None
+    estimate_only: bool | None = None
+    fresh: bool | None = None
+    max_cost_cents: int | None = Field(default=None, ge=1)
+
+
+class LoadMoreBacklinkRowsOptions(BisibilityModel):
+    target: str
+    target_scope: Literal["site", "page"]
+    include_subdomains: bool
+    limit: int = Field(ge=100, le=1000, multiple_of=100)
 
 
 class KeywordMetricsInput(BisibilityModel):

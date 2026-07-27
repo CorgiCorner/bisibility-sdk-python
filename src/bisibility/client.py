@@ -33,8 +33,10 @@ from .models import (
     AlertRule,
     AlertRuleDeleteResult,
     AlertRuleInput,
+    AnalyzeBacklinksOptions,
     ApiKey,
     ApiKeyCreateInput,
+    BacklinksSnapshot,
     Capability,
     CloudImportChunkResponse,
     CloudImportCompatibility,
@@ -62,6 +64,8 @@ from .models import (
     Keyword,
     KeywordBulkInput,
     KeywordBulkResponse,
+    KeywordMatchRequest,
+    KeywordMatchResponse,
     KeywordMetricsInput,
     KeywordMetricsResponse,
     KeywordResearchOptions,
@@ -75,6 +79,7 @@ from .models import (
     ListSearchPerformanceQueryStatsOptions,
     ListSignalsOptions,
     ListTrafficSnapshotsOptions,
+    LoadMoreBacklinkRowsOptions,
     LocationSuggestion,
     Me,
     MigrationToken,
@@ -91,6 +96,8 @@ from .models import (
     Project,
     ProjectDefaults,
     ProjectDefaultsPatch,
+    ProjectOverview,
+    ProjectOverviewOptions,
     Provider,
     ProviderConnection,
     ProviderDisconnectResult,
@@ -146,7 +153,7 @@ _MISSING = object()
 try:
     SDK_VERSION = version("bisibility")
 except PackageNotFoundError:  # pragma: no cover - source tree without installed metadata
-    SDK_VERSION = "0.2.1"
+    SDK_VERSION = "0.3.0"
 CLIENT_ID = f"bisibility-sdk-python/{SDK_VERSION}"
 
 
@@ -589,6 +596,47 @@ class BisibilityClient:
             request_options=request_options,
         )
 
+    def get_project_overview(
+        self,
+        project_id: str,
+        options: ProjectOverviewOptions | Mapping[str, Any] | None = None,
+        request_options: RequestOptionsLike = None,
+    ) -> ProjectOverview:
+        """Get a numeric project overview, optionally filtered by range, device, and tag."""
+        filters = _dump_options(options, ProjectOverviewOptions)
+        return self._request(
+            "GET",
+            f"/projects/{_encoded_path_segment(project_id)}/overview",
+            query={
+                "range": filters.get("range"),
+                "device": filters.get("device"),
+                "tag": filters.get("tag"),
+            },
+            response_model=ProjectOverview,
+            request_options=request_options,
+        )
+
+    def match_project_keywords(
+        self,
+        project_id: str,
+        input: KeywordMatchRequest | Mapping[str, Any],
+        request_options: RequestOptionsLike = None,
+    ) -> KeywordMatchResponse:
+        """Match request texts to stored project keywords and their markets.
+
+        Each row includes ``matched_text`` (the normalized request text) and
+        ``text`` (the stored keyword text). ``meta.truncated_texts`` identifies
+        normalized texts whose matching-market rows are partial.
+        """
+        body = _dump_options(input, KeywordMatchRequest)
+        return self._request(
+            "POST",
+            f"/projects/{_encoded_path_segment(project_id)}/keyword-matches",
+            body=body,
+            response_model=KeywordMatchResponse,
+            request_options=request_options,
+        )
+
     def update_project_defaults(
         self,
         project_id: str,
@@ -814,6 +862,51 @@ class BisibilityClient:
                 "seed": filters.get("seed"),
             },
             response_model=KeywordResearchResponse,
+            request_options=request_options,
+        )
+
+    def analyze_backlinks(
+        self,
+        project_id: str,
+        options: AnalyzeBacklinksOptions | Mapping[str, Any],
+        request_options: RequestOptionsLike = None,
+    ) -> DataResponse[BacklinksSnapshot]:
+        """Analyze backlinks for a target or return a free estimate.
+
+        This operation requires API write scope because a cache miss can spend the
+        project's provider budget. Set ``estimate_only`` for a free dry run.
+        """
+        filters = _dump_options(options, AnalyzeBacklinksOptions)
+        return self._request(
+            "GET",
+            f"/projects/{_encoded_path_segment(project_id)}/backlinks",
+            query={
+                "target": filters.get("target"),
+                "target_scope": filters.get("target_scope"),
+                "include_subdomains": filters.get("include_subdomains"),
+                "result_limit": filters.get("result_limit"),
+                "mode": filters.get("mode"),
+                "estimate_only": filters.get("estimate_only"),
+                "fresh": filters.get("fresh"),
+                "max_cost_cents": filters.get("max_cost_cents"),
+            },
+            response_model=DataResponse[BacklinksSnapshot],
+            request_options=request_options,
+        )
+
+    def load_more_backlink_rows(
+        self,
+        project_id: str,
+        options: LoadMoreBacklinkRowsOptions | Mapping[str, Any],
+        request_options: RequestOptionsLike = None,
+    ) -> DataResponse[BacklinksSnapshot]:
+        """Load more rows into an unexpired backlinks snapshot."""
+        body = _dump_options(options, LoadMoreBacklinkRowsOptions)
+        return self._request(
+            "POST",
+            f"/projects/{_encoded_path_segment(project_id)}/backlinks/rows",
+            body=body,
+            response_model=DataResponse[BacklinksSnapshot],
             request_options=request_options,
         )
 

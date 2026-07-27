@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## 0.3.0 - 2026-07-27
+
+- Add typed project keyword matching that distinguishes normalized request `matched_text` from
+  stored keyword `text` and reports partial matching-market rows through `meta.truncated_texts`.
+- Add typed project overview reads with dashboard filters.
+- Add typed Backlinks analyze and load-more operations.
+
 ## 0.2.1 - 2026-07-26
 
 - No library changes. The package contents are identical to `0.2.0`; this release carries the
