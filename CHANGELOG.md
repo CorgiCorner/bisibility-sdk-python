@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+## 0.3.1 - 2026-07-28
+
+- Use nullable `ranking_url` to identify which result URL a stored keyword position belongs to
+  after the last completed check.
+
 ## 0.3.0 - 2026-07-27
 
 - Add typed project keyword matching that distinguishes normalized request `matched_text` from

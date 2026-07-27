@@ -196,6 +196,7 @@ def keyword_match_response(**overrides: Any) -> dict[str, Any]:
                 "keyword_id": "kw_1",
                 "latest_position": 3,
                 "previous_position": None,
+                "ranking_url": "https://example.com/headless-cms",
                 "matched_text": "headless cms",
                 "text": " Headless CMS ",
                 "market": {
@@ -917,8 +918,8 @@ def test_sends_bearer_auth_and_default_headers_on_protected_requests() -> None:
     assert request.headers["Authorization"] == f"Bearer {API_KEY}"
     assert request.headers["X-Client"] == "sdk-test"
     assert request.headers["X-Request"] == "request"
-    assert request.headers["User-Agent"] == "bisibility-sdk-python/0.3.0"
-    assert request.headers["X-Bisibility-Client"] == "bisibility-sdk-python/0.3.0"
+    assert request.headers["User-Agent"] == "bisibility-sdk-python/0.3.1"
+    assert request.headers["X-Bisibility-Client"] == "bisibility-sdk-python/0.3.1"
     assert request.extensions["timeout"] == {
         "connect": 30.0,
         "read": 30.0,
@@ -935,7 +936,7 @@ def test_preserves_user_agent_and_allows_disabling_timeout() -> None:
 
     request = queue.requests[-1]
     assert request.headers["User-Agent"] == "my-app/1.0"
-    assert request.headers["X-Bisibility-Client"] == "bisibility-sdk-python/0.3.0"
+    assert request.headers["X-Bisibility-Client"] == "bisibility-sdk-python/0.3.1"
     assert request.extensions["timeout"] == {
         "connect": None,
         "read": None,
@@ -1441,6 +1442,7 @@ def test_matches_project_keywords_and_preserves_request_and_stored_texts() -> No
     assert matches.data[0].text == " Headless CMS "
     assert matches.data[0].latest_position == 3
     assert matches.data[0].previous_position is None
+    assert matches.data[0].ranking_url == "https://example.com/headless-cms"
     assert matches.data[0].market.device == "desktop"
     assert matches.meta.truncated_texts == ["headless cms"]
     assert queue.requests[0].method == "POST"
@@ -1449,6 +1451,18 @@ def test_matches_project_keywords_and_preserves_request_and_stored_texts() -> No
         == "https://api.test/api/v1/projects/prj%20spaced%2F1/keyword-matches"
     )
     assert request_json(queue.requests[0]) == {"texts": [" Headless CMS ", "Python SDK"]}
+
+
+def test_keyword_match_preserves_null_ranking_url() -> None:
+    response = keyword_match_response()
+    response["data"][0]["ranking_url"] = None
+    queue = QueueTransport([json_response(response)])
+    client = make_client(queue)
+
+    matches = client.match_project_keywords("prj_1", {"texts": ["headless cms"]})
+
+    assert matches.data[0].ranking_url is None
+    assert matches.data[0].model_dump()["ranking_url"] is None
 
 
 def test_keyword_match_models_match_openapi_field_sets() -> None:
@@ -1460,6 +1474,7 @@ def test_keyword_match_models_match_openapi_field_sets() -> None:
         "market",
         "matched_text",
         "previous_position",
+        "ranking_url",
         "text",
     }
     assert set(KeywordMatchMarket.model_fields) == {
@@ -1475,6 +1490,10 @@ def test_keyword_match_models_match_openapi_field_sets() -> None:
     )
     assert KeywordMatch.model_fields["text"].description == (
         "Stored keyword text, which can differ from matched_text in case and whitespace."
+    )
+    assert KeywordMatch.model_fields["ranking_url"].description == (
+        "URL that ranked at `latest_position` in the last completed check, or null when the "
+        "keyword has no completed check."
     )
     assert KeywordMatchMeta.model_fields["truncated_texts"].description == (
         "Normalized texts with more than 100 matching markets. Their returned rows are partial."

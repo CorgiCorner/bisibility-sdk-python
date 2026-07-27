@@ -334,11 +334,17 @@ class KeywordMatchMarket(BisibilityModel):
 class KeywordMatch(BisibilityModel):
     keyword_id: str
     latest_position: int | None
+    previous_position: int | None
+    ranking_url: str | None = Field(
+        description=(
+            "URL that ranked at `latest_position` in the last completed check, or null when the "
+            "keyword has no completed check."
+        )
+    )
     market: KeywordMatchMarket
     matched_text: str = Field(
         description="Trimmed, lowercase request text used to match this keyword."
     )
-    previous_position: int | None
     text: str = Field(
         description=(
             "Stored keyword text, which can differ from matched_text "

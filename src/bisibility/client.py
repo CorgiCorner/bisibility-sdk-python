@@ -153,7 +153,7 @@ _MISSING = object()
 try:
     SDK_VERSION = version("bisibility")
 except PackageNotFoundError:  # pragma: no cover - source tree without installed metadata
-    SDK_VERSION = "0.3.0"
+    SDK_VERSION = "0.3.1"
 CLIENT_ID = f"bisibility-sdk-python/{SDK_VERSION}"
 
 
