@@ -1,7 +1,7 @@
 """Synchronous client for the Bisibility REST API v1.
 
-The client accepts both project API keys (``bsk_live_*``, scoped to a single
-project) and personal access tokens (``bsp_live_*``, scoped to all of the
+The client accepts both project API keys (``bsb_key_live_*``, scoped to a single
+project) and personal access tokens (``bsb_pat_live_*``, scoped to all of the
 user's projects). PAT routes without a project in the path target a project
 via the ``X-Bisibility-Project`` header; pass ``project_id`` to the client to
 send it on every request.
@@ -41,7 +41,9 @@ from .models import (
     CloudImportChunkResponse,
     CloudImportCompatibility,
     CloudImportFinalizeResponse,
+    CloudImportKeywordUploadChunk,
     CloudImportPackage,
+    CloudImportSectionsUploadChunk,
     CloudImportSessionCreate,
     CloudImportSessionCreateResponse,
     Competitor,
@@ -137,6 +139,7 @@ from .models import (
     WebhookCreateInput,
     WebhookUpdateInput,
 )
+from .public_ids import PublicIdPrefix, require_public_id
 
 DEFAULT_BASE_URL = "https://bisibility.com/api/v1"
 RELATIVE_BASE_ORIGIN = "https://bisibility.local"
@@ -153,8 +156,9 @@ _MISSING = object()
 try:
     SDK_VERSION = version("bisibility")
 except PackageNotFoundError:  # pragma: no cover - source tree without installed metadata
-    SDK_VERSION = "0.3.1"
+    SDK_VERSION = "0.4.0"
 CLIENT_ID = f"bisibility-sdk-python/{SDK_VERSION}"
+AUTH_TOKEN_PREFIXES = ("bsb_key_live_", "bsb_key_test_", "bsb_pat_live_", "mig_")
 
 
 class _UnsetTimeout:
@@ -189,7 +193,11 @@ def _normalize_base_url(base_url: str | httpx.URL | None) -> str:
     return raw.rstrip("/")
 
 
-def _encoded_path_segment(value: str) -> str:
+def _encoded_path_segment(value: str, prefix: PublicIdPrefix) -> str:
+    return quote(require_public_id(value, prefix), safe="")
+
+
+def _encoded_natural_path_segment(value: str) -> str:
     return quote(value, safe="")
 
 
@@ -229,6 +237,28 @@ def _dump_options(
     else:
         parsed = model.model_validate(value)
     return parsed.model_dump(mode="python", by_alias=False, exclude_none=True, exclude_unset=True)
+
+
+def _dump_body(
+    value: BaseModel | Mapping[str, Any],
+    model: type[BaseModel],
+) -> dict[str, Any]:
+    """Validate a mapping body before it can cross the HTTP boundary."""
+    parsed = value if isinstance(value, model) else model.model_validate(value)
+    return parsed.model_dump(mode="python", by_alias=True, exclude_none=True, exclude_unset=True)
+
+
+def _dump_cloud_import_chunk(
+    value: CloudImportKeywordUploadChunk | CloudImportSectionsUploadChunk | Mapping[str, Any],
+) -> dict[str, Any]:
+    """Validate one discriminated cloud-import chunk before transport."""
+    if isinstance(value, (CloudImportKeywordUploadChunk, CloudImportSectionsUploadChunk)):
+        parsed = value
+    elif value.get("kind") == "sections":
+        parsed = CloudImportSectionsUploadChunk.model_validate(value)
+    else:
+        parsed = CloudImportKeywordUploadChunk.model_validate(value)
+    return parsed.model_dump(mode="python", by_alias=True, exclude_none=True, exclude_unset=True)
 
 
 def _coerce_request_options(value: RequestOptionsLike = None) -> RequestOptions:
@@ -306,8 +336,9 @@ def _backoff_seconds(attempt: int) -> float:
 class BisibilityClient:
     """Synchronous Bisibility API client.
 
-    ``api_key`` accepts a project API key (``bsk_live_*``) or a personal
-    access token (``bsp_live_*``). PATs cover all of the user's projects; on
+    ``api_key`` accepts a project API key (``bsb_key_live_*`` or
+    ``bsb_key_test_*``), a personal access token (``bsb_pat_live_*``), or a
+    migration bearer (``mig_*``). PATs cover all of the user's projects; on
     routes without a project in the path the target project is chosen via the
     ``X-Bisibility-Project`` header (project ``id`` or public id). Pass
     ``project_id`` to send that header on every request; without it the API
@@ -341,8 +372,17 @@ class BisibilityClient:
     ) -> None:
         if max_retries < 0:
             raise BisibilityConfigurationError("max_retries cannot be negative.")
+        if api_key is not None and not api_key.startswith(AUTH_TOKEN_PREFIXES):
+            raise BisibilityConfigurationError(
+                "api_key must use a current bsb_key_live_, bsb_key_test_, "
+                "bsb_pat_live_, or mig_ prefix."
+            )
         self.api_key = api_key
-        self.project_id = project_id
+        self.project_id = (
+            require_public_id(project_id, "prj", field="project_id")
+            if project_id is not None
+            else None
+        )
         self.base_url = _normalize_base_url(base_url)
         self.max_retries = max_retries
         self._default_headers = dict(headers or {})
@@ -518,7 +558,7 @@ class BisibilityClient:
     ) -> PersonalAccessToken:
         return self._request(
             "DELETE",
-            f"/me/tokens/{_encoded_path_segment(token_id)}",
+            f"/me/tokens/{_encoded_path_segment(token_id, 'pat')}",
             response_model=PersonalAccessToken,
             request_options=request_options,
         )
@@ -543,7 +583,7 @@ class BisibilityClient:
     ) -> Project:
         return self._request(
             "GET",
-            f"/projects/{_encoded_path_segment(project_id)}",
+            f"/projects/{_encoded_path_segment(project_id, 'prj')}",
             response_model=Project,
             request_options=request_options,
         )
@@ -561,7 +601,7 @@ class BisibilityClient:
         """
         return self._request(
             "PATCH",
-            f"/projects/{_encoded_path_segment(project_id)}",
+            f"/projects/{_encoded_path_segment(project_id, 'prj')}",
             body=input,
             response_model=Project,
             request_options=request_options,
@@ -578,7 +618,7 @@ class BisibilityClient:
         """
         return self._request(
             "DELETE",
-            f"/projects/{_encoded_path_segment(project_id)}",
+            f"/projects/{_encoded_path_segment(project_id, 'prj')}",
             response_model=Project,
             request_options=request_options,
         )
@@ -591,7 +631,7 @@ class BisibilityClient:
         """Get project-level keyword defaults via GET /projects/{id}/defaults."""
         return self._request(
             "GET",
-            f"/projects/{_encoded_path_segment(project_id)}/defaults",
+            f"/projects/{_encoded_path_segment(project_id, 'prj')}/defaults",
             response_model=ProjectDefaults,
             request_options=request_options,
         )
@@ -606,7 +646,7 @@ class BisibilityClient:
         filters = _dump_options(options, ProjectOverviewOptions)
         return self._request(
             "GET",
-            f"/projects/{_encoded_path_segment(project_id)}/overview",
+            f"/projects/{_encoded_path_segment(project_id, 'prj')}/overview",
             query={
                 "range": filters.get("range"),
                 "device": filters.get("device"),
@@ -631,7 +671,7 @@ class BisibilityClient:
         body = _dump_options(input, KeywordMatchRequest)
         return self._request(
             "POST",
-            f"/projects/{_encoded_path_segment(project_id)}/keyword-matches",
+            f"/projects/{_encoded_path_segment(project_id, 'prj')}/keyword-matches",
             body=body,
             response_model=KeywordMatchResponse,
             request_options=request_options,
@@ -652,7 +692,7 @@ class BisibilityClient:
         """
         return self._request(
             "PATCH",
-            f"/projects/{_encoded_path_segment(project_id)}/defaults",
+            f"/projects/{_encoded_path_segment(project_id, 'prj')}/defaults",
             body=input,
             response_model=ProjectDefaults,
             request_options=request_options,
@@ -692,7 +732,7 @@ class BisibilityClient:
     ) -> ApiKey:
         return self._request(
             "DELETE",
-            f"/api-keys/{_encoded_path_segment(key_id)}",
+            f"/api-keys/{_encoded_path_segment(key_id, 'key')}",
             response_model=ApiKey,
             request_options=request_options,
         )
@@ -706,7 +746,7 @@ class BisibilityClient:
         pagination = _dump_options(options, PaginationOptions)
         return self._request(
             "GET",
-            f"/projects/{_encoded_path_segment(project_id)}/api-keys",
+            f"/projects/{_encoded_path_segment(project_id, 'prj')}/api-keys",
             query={"cursor": pagination.get("cursor"), "limit": pagination.get("limit")},
             response_model=ListResponse[ApiKey],
             request_options=request_options,
@@ -720,7 +760,7 @@ class BisibilityClient:
     ) -> CreatedApiKey:
         return self._request(
             "POST",
-            f"/projects/{_encoded_path_segment(project_id)}/api-keys",
+            f"/projects/{_encoded_path_segment(project_id, 'prj')}/api-keys",
             body=input,
             response_model=CreatedApiKey,
             request_options=request_options,
@@ -735,7 +775,7 @@ class BisibilityClient:
         pagination = _dump_options(options, PaginationOptions)
         return self._request(
             "GET",
-            f"/projects/{_encoded_path_segment(project_id)}/webhooks",
+            f"/projects/{_encoded_path_segment(project_id, 'prj')}/webhooks",
             query={"cursor": pagination.get("cursor"), "limit": pagination.get("limit")},
             response_model=ListResponse[Webhook],
             request_options=request_options,
@@ -749,7 +789,7 @@ class BisibilityClient:
     ) -> Webhook:
         return self._request(
             "POST",
-            f"/projects/{_encoded_path_segment(project_id)}/webhooks",
+            f"/projects/{_encoded_path_segment(project_id, 'prj')}/webhooks",
             body=input,
             response_model=Webhook,
             request_options=request_options,
@@ -765,8 +805,8 @@ class BisibilityClient:
         return self._request(
             "PATCH",
             (
-                f"/projects/{_encoded_path_segment(project_id)}/webhooks/"
-                f"{_encoded_path_segment(webhook_id)}"
+                f"/projects/{_encoded_path_segment(project_id, 'prj')}/webhooks/"
+                f"{_encoded_path_segment(webhook_id, 'we')}"
             ),
             body=input,
             response_model=Webhook,
@@ -782,8 +822,8 @@ class BisibilityClient:
         return self._request(
             "DELETE",
             (
-                f"/projects/{_encoded_path_segment(project_id)}/webhooks/"
-                f"{_encoded_path_segment(webhook_id)}"
+                f"/projects/{_encoded_path_segment(project_id, 'prj')}/webhooks/"
+                f"{_encoded_path_segment(webhook_id, 'we')}"
             ),
             response_model=Webhook,
             request_options=request_options,
@@ -798,7 +838,7 @@ class BisibilityClient:
         filters = _dump_options(options, ListKeywordsOptions)
         return self._request(
             "GET",
-            f"/projects/{_encoded_path_segment(project_id)}/keywords",
+            f"/projects/{_encoded_path_segment(project_id, 'prj')}/keywords",
             query={
                 "cursor": filters.get("cursor"),
                 "filter[country]": filters.get("country"),
@@ -825,7 +865,7 @@ class BisibilityClient:
         filters = _dump_options(options, ListRankedKeywordSuggestionsOptions)
         return self._request(
             "GET",
-            f"/projects/{_encoded_path_segment(project_id)}/ranked-keyword-suggestions",
+            f"/projects/{_encoded_path_segment(project_id, 'prj')}/ranked-keyword-suggestions",
             query={
                 "connection_id": filters.get("connection_id"),
                 "fresh": filters.get("fresh"),
@@ -850,7 +890,7 @@ class BisibilityClient:
         filters = _dump_options(options, KeywordResearchOptions)
         return self._request(
             "GET",
-            f"/projects/{_encoded_path_segment(project_id)}/keyword-research",
+            f"/projects/{_encoded_path_segment(project_id, 'prj')}/keyword-research",
             query={
                 "connection_id": filters.get("connection_id"),
                 "estimate_only": filters.get("estimate_only"),
@@ -879,7 +919,7 @@ class BisibilityClient:
         filters = _dump_options(options, AnalyzeBacklinksOptions)
         return self._request(
             "GET",
-            f"/projects/{_encoded_path_segment(project_id)}/backlinks",
+            f"/projects/{_encoded_path_segment(project_id, 'prj')}/backlinks",
             query={
                 "target": filters.get("target"),
                 "target_scope": filters.get("target_scope"),
@@ -904,7 +944,7 @@ class BisibilityClient:
         body = _dump_options(options, LoadMoreBacklinkRowsOptions)
         return self._request(
             "POST",
-            f"/projects/{_encoded_path_segment(project_id)}/backlinks/rows",
+            f"/projects/{_encoded_path_segment(project_id, 'prj')}/backlinks/rows",
             body=body,
             response_model=DataResponse[BacklinksSnapshot],
             request_options=request_options,
@@ -923,7 +963,7 @@ class BisibilityClient:
         """
         return self._request(
             "POST",
-            f"/projects/{_encoded_path_segment(project_id)}/keyword-metrics",
+            f"/projects/{_encoded_path_segment(project_id, 'prj')}/keyword-metrics",
             body=input,
             response_model=KeywordMetricsResponse,
             request_options=request_options,
@@ -937,7 +977,7 @@ class BisibilityClient:
     ) -> CreateKeywordsResponse:
         return self._request(
             "POST",
-            f"/projects/{_encoded_path_segment(project_id)}/keywords",
+            f"/projects/{_encoded_path_segment(project_id, 'prj')}/keywords",
             body=input,
             response_model=CreateKeywordsResponse,
             request_options=request_options,
@@ -954,7 +994,7 @@ class BisibilityClient:
     def get_keyword(self, keyword_id: str, request_options: RequestOptionsLike = None) -> Keyword:
         return self._request(
             "GET",
-            f"/keywords/{_encoded_path_segment(keyword_id)}",
+            f"/keywords/{_encoded_path_segment(keyword_id, 'kw')}",
             response_model=Keyword,
             request_options=request_options,
         )
@@ -967,7 +1007,7 @@ class BisibilityClient:
     ) -> Keyword:
         return self._request(
             "PATCH",
-            f"/keywords/{_encoded_path_segment(keyword_id)}",
+            f"/keywords/{_encoded_path_segment(keyword_id, 'kw')}",
             body=input,
             response_model=Keyword,
             request_options=request_options,
@@ -992,7 +1032,7 @@ class BisibilityClient:
     ) -> Keyword | None:
         return self._request(
             "DELETE",
-            f"/keywords/{_encoded_path_segment(keyword_id)}",
+            f"/keywords/{_encoded_path_segment(keyword_id, 'kw')}",
             response_model=Keyword,
             request_options=request_options,
         )
@@ -1002,10 +1042,11 @@ class BisibilityClient:
         input: KeywordBulkInput | Mapping[str, Any],
         request_options: RequestOptionsLike = None,
     ) -> KeywordBulkResponse:
+        body = _dump_body(input, KeywordBulkInput)
         return self._request(
             "POST",
             "/keywords/bulk",
-            body=input,
+            body=body,
             response_model=KeywordBulkResponse,
             request_options=request_options,
         )
@@ -1019,7 +1060,7 @@ class BisibilityClient:
         filters = _dump_options(options, ListRankChecksOptions)
         return self._request(
             "GET",
-            f"/keywords/{_encoded_path_segment(keyword_id)}/rank-checks",
+            f"/keywords/{_encoded_path_segment(keyword_id, 'kw')}/rank-checks",
             query={
                 "cursor": filters.get("cursor"),
                 "limit": filters.get("limit"),
@@ -1054,7 +1095,7 @@ class BisibilityClient:
                 body = dumped
         return self._request(
             "POST",
-            f"/keywords/{_encoded_path_segment(keyword_id)}/checks",
+            f"/keywords/{_encoded_path_segment(keyword_id, 'kw')}/checks",
             body=body,
             query={"async": True} if async_mode else None,
             response_model=RankCheck,
@@ -1068,7 +1109,7 @@ class BisibilityClient:
     ) -> RankCheck:
         return self._request(
             "GET",
-            f"/rank-checks/{_encoded_path_segment(check_id)}",
+            f"/rank-checks/{_encoded_path_segment(check_id, 'check')}",
             response_model=RankCheck,
             request_options=request_options,
         )
@@ -1110,7 +1151,7 @@ class BisibilityClient:
         filters = _dump_options(options, ListSignalsOptions)
         return self._request(
             "GET",
-            f"/projects/{_encoded_path_segment(project_id)}/signals",
+            f"/projects/{_encoded_path_segment(project_id, 'prj')}/signals",
             query={
                 "cursor": filters.get("cursor"),
                 "from": filters.get("from_"),
@@ -1132,7 +1173,7 @@ class BisibilityClient:
         filters = _dump_options(options, ListTrafficSnapshotsOptions)
         return self._request(
             "GET",
-            f"/projects/{_encoded_path_segment(project_id)}/analytics/traffic-snapshots",
+            f"/projects/{_encoded_path_segment(project_id, 'prj')}/analytics/traffic-snapshots",
             query={
                 "end_date": filters.get("end_date"),
                 "limit": filters.get("limit"),
@@ -1153,7 +1194,7 @@ class BisibilityClient:
         filters = _dump_options(options, ListSearchPerformanceQueryStatsOptions)
         return self._request(
             "GET",
-            f"/projects/{_encoded_path_segment(project_id)}/analytics/query-stats",
+            f"/projects/{_encoded_path_segment(project_id, 'prj')}/analytics/query-stats",
             query={
                 "connection_id": filters.get("connection_id"),
                 "end_date": filters.get("end_date"),
@@ -1172,7 +1213,7 @@ class BisibilityClient:
     ) -> TrafficSyncSummary:
         return self._request(
             "POST",
-            f"/projects/{_encoded_path_segment(project_id)}/analytics/sync",
+            f"/projects/{_encoded_path_segment(project_id, 'prj')}/analytics/sync",
             response_model=TrafficSyncSummary,
             request_options=request_options,
         )
@@ -1186,7 +1227,7 @@ class BisibilityClient:
         pagination = _dump_options(options, PaginationOptions)
         return self._request(
             "GET",
-            f"/projects/{_encoded_path_segment(project_id)}/alert-rules",
+            f"/projects/{_encoded_path_segment(project_id, 'prj')}/alert-rules",
             query={"cursor": pagination.get("cursor"), "limit": pagination.get("limit")},
             response_model=ListResponse[AlertRule],
             request_options=request_options,
@@ -1198,10 +1239,11 @@ class BisibilityClient:
         input: AlertRuleInput | Mapping[str, Any],
         request_options: RequestOptionsLike = None,
     ) -> AlertRule:
+        body = _dump_body(input, AlertRuleInput)
         return self._request(
             "POST",
-            f"/projects/{_encoded_path_segment(project_id)}/alert-rules",
-            body=input,
+            f"/projects/{_encoded_path_segment(project_id, 'prj')}/alert-rules",
+            body=body,
             response_model=AlertRule,
             request_options=request_options,
         )
@@ -1212,10 +1254,11 @@ class BisibilityClient:
         input: AlertRuleInput | Mapping[str, Any],
         request_options: RequestOptionsLike = None,
     ) -> AlertRule:
+        body = _dump_body(input, AlertRuleInput)
         return self._request(
             "PATCH",
-            f"/alert-rules/{_encoded_path_segment(rule_id)}",
-            body=input,
+            f"/alert-rules/{_encoded_path_segment(rule_id, 'alr')}",
+            body=body,
             response_model=AlertRule,
             request_options=request_options,
         )
@@ -1227,7 +1270,7 @@ class BisibilityClient:
     ) -> AlertRuleDeleteResult:
         return self._request(
             "DELETE",
-            f"/alert-rules/{_encoded_path_segment(rule_id)}",
+            f"/alert-rules/{_encoded_path_segment(rule_id, 'alr')}",
             response_model=AlertRuleDeleteResult,
             request_options=request_options,
         )
@@ -1241,7 +1284,7 @@ class BisibilityClient:
         pagination = _dump_options(options, PaginationOptions)
         return self._request(
             "GET",
-            f"/projects/{_encoded_path_segment(project_id)}/triggered-alerts",
+            f"/projects/{_encoded_path_segment(project_id, 'prj')}/triggered-alerts",
             query={"cursor": pagination.get("cursor"), "limit": pagination.get("limit")},
             response_model=ListResponse[TriggeredAlert],
             request_options=request_options,
@@ -1256,8 +1299,8 @@ class BisibilityClient:
         return self._request(
             "POST",
             (
-                f"/projects/{_encoded_path_segment(project_id)}/triggered-alerts/"
-                f"{_encoded_path_segment(alert_id)}/mute"
+                f"/projects/{_encoded_path_segment(project_id, 'prj')}/triggered-alerts/"
+                f"{_encoded_path_segment(alert_id, 'al')}/mute"
             ),
             response_model=TriggeredAlertMuteResult,
             request_options=request_options,
@@ -1270,7 +1313,7 @@ class BisibilityClient:
     ) -> TriggeredAlertsReadResult:
         return self._request(
             "POST",
-            f"/projects/{_encoded_path_segment(project_id)}/triggered-alerts/mark-read",
+            f"/projects/{_encoded_path_segment(project_id, 'prj')}/triggered-alerts/mark-read",
             response_model=TriggeredAlertsReadResult,
             request_options=request_options,
         )
@@ -1282,7 +1325,7 @@ class BisibilityClient:
         request_options: RequestOptionsLike = None,
     ) -> RankHistoryExportResponse | str:
         filters = _dump_options(options, RankHistoryExportOptions)
-        path = f"/projects/{_encoded_path_segment(project_id)}/exports/rank-history"
+        path = f"/projects/{_encoded_path_segment(project_id, 'prj')}/exports/rank-history"
         query = {
             "cursor": filters.get("cursor"),
             "format": filters.get("format"),
@@ -1314,7 +1357,7 @@ class BisibilityClient:
     ) -> SitemapMonitorListResponse:
         return self._request(
             "GET",
-            f"/projects/{_encoded_path_segment(project_id)}/sitemap-monitors",
+            f"/projects/{_encoded_path_segment(project_id, 'prj')}/sitemap-monitors",
             response_model=ListResponse[SitemapMonitor],
             request_options=request_options,
         )
@@ -1329,8 +1372,8 @@ class BisibilityClient:
         return self._request(
             "PATCH",
             (
-                f"/projects/{_encoded_path_segment(project_id)}/sitemap-monitors/"
-                f"{_encoded_path_segment(monitor_id)}"
+                f"/projects/{_encoded_path_segment(project_id, 'prj')}/sitemap-monitors/"
+                f"{_encoded_path_segment(monitor_id, 'prj')}"
             ),
             body=input,
             response_model=SitemapMonitor,
@@ -1346,7 +1389,7 @@ class BisibilityClient:
         pagination = _dump_options(options, PaginationOptions)
         return self._request(
             "GET",
-            f"/projects/{_encoded_path_segment(project_id)}/team/members",
+            f"/projects/{_encoded_path_segment(project_id, 'prj')}/team/members",
             query={"cursor": pagination.get("cursor"), "limit": pagination.get("limit")},
             response_model=ListResponse[TeamMember],
             request_options=request_options,
@@ -1361,7 +1404,7 @@ class BisibilityClient:
         pagination = _dump_options(options, PaginationOptions)
         return self._request(
             "GET",
-            f"/projects/{_encoded_path_segment(project_id)}/team/invites",
+            f"/projects/{_encoded_path_segment(project_id, 'prj')}/team/invites",
             query={"cursor": pagination.get("cursor"), "limit": pagination.get("limit")},
             response_model=ListResponse[TeamInvite],
             request_options=request_options,
@@ -1375,7 +1418,7 @@ class BisibilityClient:
     ) -> CreatedTeamInvite:
         return self._request(
             "POST",
-            f"/projects/{_encoded_path_segment(project_id)}/team/invites",
+            f"/projects/{_encoded_path_segment(project_id, 'prj')}/team/invites",
             body=input,
             response_model=CreatedTeamInvite,
             request_options=request_options,
@@ -1390,8 +1433,8 @@ class BisibilityClient:
         return self._request(
             "POST",
             (
-                f"/projects/{_encoded_path_segment(project_id)}/team/invites/"
-                f"{_encoded_path_segment(invite_id)}/resend"
+                f"/projects/{_encoded_path_segment(project_id, 'prj')}/team/invites/"
+                f"{_encoded_path_segment(invite_id, 'inv')}/resend"
             ),
             response_model=TeamInviteResendResult,
             request_options=request_options,
@@ -1407,8 +1450,8 @@ class BisibilityClient:
         return self._request(
             "PATCH",
             (
-                f"/projects/{_encoded_path_segment(project_id)}/team/members/"
-                f"{_encoded_path_segment(member_id)}"
+                f"/projects/{_encoded_path_segment(project_id, 'prj')}/team/members/"
+                f"{_encoded_path_segment(member_id, 'mbr')}"
             ),
             body=input,
             response_model=TeamMemberRoleResult,
@@ -1424,8 +1467,8 @@ class BisibilityClient:
         return self._request(
             "DELETE",
             (
-                f"/projects/{_encoded_path_segment(project_id)}/team/members/"
-                f"{_encoded_path_segment(member_id)}"
+                f"/projects/{_encoded_path_segment(project_id, 'prj')}/team/members/"
+                f"{_encoded_path_segment(member_id, 'mbr')}"
             ),
             response_model=TeamMemberMutationResult,
             request_options=request_options,
@@ -1440,8 +1483,8 @@ class BisibilityClient:
         return self._request(
             "DELETE",
             (
-                f"/projects/{_encoded_path_segment(project_id)}/team/invites/"
-                f"{_encoded_path_segment(invite_id)}"
+                f"/projects/{_encoded_path_segment(project_id, 'prj')}/team/invites/"
+                f"{_encoded_path_segment(invite_id, 'inv')}"
             ),
             response_model=RevokedTeamInvite,
             request_options=request_options,
@@ -1454,7 +1497,7 @@ class BisibilityClient:
     ) -> RevokedTeamInvite:
         return self._request(
             "DELETE",
-            f"/team/invites/{_encoded_path_segment(invite_id)}",
+            f"/team/invites/{_encoded_path_segment(invite_id, 'inv')}",
             response_model=RevokedTeamInvite,
             request_options=request_options,
         )
@@ -1468,7 +1511,7 @@ class BisibilityClient:
         pagination = _dump_options(options, PaginationOptions)
         return self._request(
             "GET",
-            f"/projects/{_encoded_path_segment(project_id)}/providers",
+            f"/projects/{_encoded_path_segment(project_id, 'prj')}/providers",
             query={"cursor": pagination.get("cursor"), "limit": pagination.get("limit")},
             response_model=ListResponse[Provider],
             request_options=request_options,
@@ -1484,8 +1527,8 @@ class BisibilityClient:
         return self._request(
             "POST",
             (
-                f"/projects/{_encoded_path_segment(project_id)}/providers/"
-                f"{_encoded_path_segment(provider_id)}/connect"
+                f"/projects/{_encoded_path_segment(project_id, 'prj')}/providers/"
+                f"{_encoded_natural_path_segment(provider_id)}/connect"
             ),
             body=input if input is not None else _MISSING,
             response_model=ProviderConnection,
@@ -1502,8 +1545,8 @@ class BisibilityClient:
         return self._request(
             "POST",
             (
-                f"/projects/{_encoded_path_segment(project_id)}/providers/"
-                f"{_encoded_path_segment(provider_id)}/test"
+                f"/projects/{_encoded_path_segment(project_id, 'prj')}/providers/"
+                f"{_encoded_natural_path_segment(provider_id)}/test"
             ),
             body=input if input is not None else _MISSING,
             response_model=ProviderTestResult,
@@ -1520,8 +1563,8 @@ class BisibilityClient:
         return self._request(
             "PATCH",
             (
-                f"/projects/{_encoded_path_segment(project_id)}/providers/"
-                f"{_encoded_path_segment(provider_id)}"
+                f"/projects/{_encoded_path_segment(project_id, 'prj')}/providers/"
+                f"{_encoded_natural_path_segment(provider_id)}"
             ),
             body=input,
             response_model=ProviderConnection,
@@ -1579,8 +1622,8 @@ class BisibilityClient:
         return self._request(
             "DELETE",
             (
-                f"/projects/{_encoded_path_segment(project_id)}/providers/"
-                f"{_encoded_path_segment(provider_id)}"
+                f"/projects/{_encoded_path_segment(project_id, 'prj')}/providers/"
+                f"{_encoded_natural_path_segment(provider_id)}"
             ),
             response_model=ProviderDisconnectResult,
             request_options=request_options,
@@ -1595,7 +1638,7 @@ class BisibilityClient:
         pagination = _dump_options(options, PaginationOptions)
         return self._request(
             "GET",
-            f"/projects/{_encoded_path_segment(project_id)}/saved-views",
+            f"/projects/{_encoded_path_segment(project_id, 'prj')}/saved-views",
             query={"cursor": pagination.get("cursor"), "limit": pagination.get("limit")},
             response_model=ListResponse[SavedView],
             request_options=request_options,
@@ -1609,7 +1652,7 @@ class BisibilityClient:
     ) -> SavedView:
         return self._request(
             "POST",
-            f"/projects/{_encoded_path_segment(project_id)}/saved-views",
+            f"/projects/{_encoded_path_segment(project_id, 'prj')}/saved-views",
             body=input,
             response_model=SavedView,
             request_options=request_options,
@@ -1624,8 +1667,8 @@ class BisibilityClient:
         return self._request(
             "DELETE",
             (
-                f"/projects/{_encoded_path_segment(project_id)}/saved-views/"
-                f"{_encoded_path_segment(view_id)}"
+                f"/projects/{_encoded_path_segment(project_id, 'prj')}/saved-views/"
+                f"{_encoded_path_segment(view_id, 'viw')}"
             ),
             response_model=SavedViewDeleteResult,
             request_options=request_options,
@@ -1638,7 +1681,7 @@ class BisibilityClient:
     ) -> SavedViewDeleteResult:
         return self._request(
             "DELETE",
-            f"/saved-views/{_encoded_path_segment(view_id)}",
+            f"/saved-views/{_encoded_path_segment(view_id, 'viw')}",
             response_model=SavedViewDeleteResult,
             request_options=request_options,
         )
@@ -1652,7 +1695,7 @@ class BisibilityClient:
         pagination = _dump_options(options, PaginationOptions)
         return self._request(
             "GET",
-            f"/projects/{_encoded_path_segment(project_id)}/competitors",
+            f"/projects/{_encoded_path_segment(project_id, 'prj')}/competitors",
             query={"cursor": pagination.get("cursor"), "limit": pagination.get("limit")},
             response_model=ListCompetitorsResponse,
             request_options=request_options,
@@ -1666,7 +1709,7 @@ class BisibilityClient:
     ) -> Competitor:
         return self._request(
             "POST",
-            f"/projects/{_encoded_path_segment(project_id)}/competitors",
+            f"/projects/{_encoded_path_segment(project_id, 'prj')}/competitors",
             body=input,
             response_model=Competitor,
             request_options=request_options,
@@ -1681,8 +1724,8 @@ class BisibilityClient:
         return self._request(
             "DELETE",
             (
-                f"/projects/{_encoded_path_segment(project_id)}/competitors/"
-                f"{_encoded_path_segment(competitor_id)}"
+                f"/projects/{_encoded_path_segment(project_id, 'prj')}/competitors/"
+                f"{_encoded_path_segment(competitor_id, 'cmp')}"
             ),
             response_model=CompetitorRemoveResult,
             request_options=request_options,
@@ -1695,7 +1738,7 @@ class BisibilityClient:
     ) -> CompetitorRemoveResult:
         return self._request(
             "DELETE",
-            f"/competitors/{_encoded_path_segment(competitor_id)}",
+            f"/competitors/{_encoded_path_segment(competitor_id, 'cmp')}",
             response_model=CompetitorRemoveResult,
             request_options=request_options,
         )
@@ -1707,7 +1750,7 @@ class BisibilityClient:
     ) -> NotificationPreferences:
         return self._request(
             "GET",
-            f"/projects/{_encoded_path_segment(project_id)}/notification-preferences",
+            f"/projects/{_encoded_path_segment(project_id, 'prj')}/notification-preferences",
             response_model=NotificationPreferences,
             request_options=request_options,
         )
@@ -1720,7 +1763,7 @@ class BisibilityClient:
     ) -> NotificationPreferences:
         return self._request(
             "PATCH",
-            f"/projects/{_encoded_path_segment(project_id)}/notification-preferences",
+            f"/projects/{_encoded_path_segment(project_id, 'prj')}/notification-preferences",
             body=input,
             response_model=NotificationPreferences,
             request_options=request_options,
@@ -1733,7 +1776,7 @@ class BisibilityClient:
     ) -> ListMigrationTokensResponse:
         return self._request(
             "GET",
-            f"/projects/{_encoded_path_segment(project_id)}/migration-tokens",
+            f"/projects/{_encoded_path_segment(project_id, 'prj')}/migration-tokens",
             response_model=ListMigrationTokensResponse,
             request_options=request_options,
         )
@@ -1746,7 +1789,7 @@ class BisibilityClient:
     ) -> IssuedMigrationToken:
         return self._request(
             "POST",
-            f"/projects/{_encoded_path_segment(project_id)}/migration-tokens",
+            f"/projects/{_encoded_path_segment(project_id, 'prj')}/migration-tokens",
             body=input if input is not None else _MISSING,
             response_model=IssuedMigrationToken,
             request_options=request_options,
@@ -1761,8 +1804,8 @@ class BisibilityClient:
         return self._request(
             "DELETE",
             (
-                f"/projects/{_encoded_path_segment(project_id)}/migration-tokens/"
-                f"{_encoded_path_segment(token_id)}"
+                f"/projects/{_encoded_path_segment(project_id, 'prj')}/migration-tokens/"
+                f"{_encoded_path_segment(token_id, 'ferry')}"
             ),
             response_model=MigrationTokenRevokeResult,
             request_options=request_options,
@@ -1775,7 +1818,7 @@ class BisibilityClient:
     ) -> MigrationTokenRevokeResult:
         return self._request(
             "DELETE",
-            f"/migration-tokens/{_encoded_path_segment(token_id)}",
+            f"/migration-tokens/{_encoded_path_segment(token_id, 'ferry')}",
             response_model=MigrationTokenRevokeResult,
             request_options=request_options,
         )
@@ -1809,10 +1852,11 @@ class BisibilityClient:
         the JSON body and the server answers ``201`` with the finalized import
         counts once the import completes.
         """
+        body = _dump_body(package, CloudImportPackage)
         return self._request(
             "POST",
             "/cloud/import",
-            body=package,
+            body=body,
             response_model=CloudImportFinalizeResponse,
             request_options=request_options,
         )
@@ -1824,15 +1868,17 @@ class BisibilityClient:
     ) -> CloudImportSessionCreateResponse:
         """Open a chunked cloud import session via POST /cloud/import/sessions.
 
-        ``session`` declares the export ``version`` and ``chunk_count`` (and
-        optional ``totals``). The response carries the ``session_id`` used to
-        upload chunks and the per-chunk size limits enforced by the server.
+        ``session`` declares the version-5 export ``version``, ``chunk_count``
+        and required ``source_project_id`` (plus optional ``totals``). The
+        response carries the ``imp_``-prefixed ``session_id`` used to upload
+        chunks and the per-chunk size limits enforced by the server.
         Authenticate with a migration token passed as the client ``api_key``.
         """
+        body = _dump_body(session, CloudImportSessionCreate)
         return self._request(
             "POST",
             "/cloud/import/sessions",
-            body=session,
+            body=body,
             response_model=CloudImportSessionCreateResponse,
             request_options=request_options,
         )
@@ -1841,15 +1887,16 @@ class BisibilityClient:
         self,
         session_id: str,
         index: int,
-        chunk: Mapping[str, Any],
+        chunk: CloudImportKeywordUploadChunk | CloudImportSectionsUploadChunk | Mapping[str, Any],
         request_options: RequestOptionsLike = None,
         *,
         gzip: bool = False,
     ) -> CloudImportChunkResponse:
         """Upload one chunk via PUT /cloud/import/sessions/{sessionId}/chunks/{index}.
 
-        ``chunk`` is a JSON body carrying a ``checksum`` (``sha256:<hex>``), a
-        ``kind`` (``"keywords"`` or ``"sections"``) and the matching payload.
+        ``chunk`` is a strict discriminated JSON body carrying a ``checksum``
+        (``sha256:<hex>``), a ``kind`` (``"keywords"`` or ``"sections"``)
+        and the matching payload.
         Set ``gzip=True`` when ``chunk`` is a gzip-compressed JSON body to send
         the ``Content-Encoding: gzip`` header. Authenticate with a migration
         token passed as the client ``api_key``.
@@ -1863,10 +1910,11 @@ class BisibilityClient:
                 idempotency_key=options.idempotency_key,
                 timeout=options.timeout,
             )
+        body = _dump_cloud_import_chunk(chunk)
         return self._request(
             "PUT",
-            (f"/cloud/import/sessions/{_encoded_path_segment(session_id)}/chunks/{index}"),
-            body=chunk,
+            (f"/cloud/import/sessions/{_encoded_path_segment(session_id, 'imp')}/chunks/{index}"),
+            body=body,
             response_model=CloudImportChunkResponse,
             request_options=options,
         )
@@ -1884,7 +1932,7 @@ class BisibilityClient:
         """
         return self._request(
             "POST",
-            (f"/cloud/import/sessions/{_encoded_path_segment(session_id)}/finalize"),
+            (f"/cloud/import/sessions/{_encoded_path_segment(session_id, 'imp')}/finalize"),
             response_model=CloudImportFinalizeResponse,
             request_options=request_options,
         )
@@ -2086,7 +2134,7 @@ class BisibilityClient:
         request_options: RequestOptionsLike = None,
     ) -> Iterator[MigrationToken]:
         initial = _dump_options(options, PaginationOptions)
-        path = f"/projects/{_encoded_path_segment(project_id)}/migration-tokens"
+        path = f"/projects/{_encoded_path_segment(project_id, 'prj')}/migration-tokens"
         return cast(
             Iterator[MigrationToken],
             self._iterate_cursor(
@@ -2145,6 +2193,12 @@ class BisibilityClient:
             headers[PROJECT_HEADER] = self.project_id
         if options.headers:
             headers.update(options.headers)
+        if PROJECT_HEADER in headers:
+            headers[PROJECT_HEADER] = require_public_id(
+                headers[PROJECT_HEADER],
+                "prj",
+                field=PROJECT_HEADER,
+            )
         if auth:
             headers["Authorization"] = f"Bearer {self.api_key}"
         else:
@@ -2234,7 +2288,17 @@ class BisibilityClient:
 
         validator = getattr(response_model, "model_validate", None)
         if callable(validator):
-            return cast(T, validator(parsed))
+            try:
+                return cast(T, validator(parsed))
+            except ValidationError as exc:
+                raise BisibilityResponseError(
+                    "Bisibility API returned a response that violates the SDK contract.",
+                    body=body,
+                    cause=exc,
+                    method=method,
+                    status=response.status_code,
+                    url=url,
+                ) from exc
         return cast(T, parsed)
 
     def _error_from_response(

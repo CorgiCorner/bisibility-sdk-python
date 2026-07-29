@@ -1,10 +1,45 @@
 from __future__ import annotations
 
+import base64
+import json
+import re
 from collections.abc import Mapping, Sequence
 from datetime import date, datetime
 from typing import Annotated, Any, Generic, Literal, TypeAlias, TypeVar
 
-from pydantic import AliasChoices, BaseModel, ConfigDict, Field, field_validator
+from pydantic import (
+    AfterValidator,
+    AliasChoices,
+    BaseModel,
+    ConfigDict,
+    Field,
+    field_validator,
+    model_validator,
+)
+
+from .public_ids import (
+    PUBLIC_ID_PREFIXES,
+    PUBLIC_ID_SUFFIX_PATTERN,
+    AlertRuleId,
+    CheckId,
+    CloudImportId,
+    CompetitorId,
+    ConnectionId,
+    InviteId,
+    KeyId,
+    KeywordId,
+    MemberId,
+    PersonalAccessTokenId,
+    ProjectId,
+    SignalId,
+    TagId,
+    TransferTokenId,
+    TriggeredAlertId,
+    UserId,
+    ViewId,
+    WebhookEndpointId,
+    require_public_id,
+)
 
 JsonObject: TypeAlias = dict[str, Any]
 Device: TypeAlias = Literal["desktop", "mobile"]
@@ -111,6 +146,51 @@ SitemapMonitorStatus: TypeAlias = Literal["active", "disabled", "pending"]
 T = TypeVar("T")
 
 
+def _validate_cursor_v3(value: str) -> str:
+    if not isinstance(value, str) or not value or len(value) > 2048:
+        raise ValueError("cursor must be an opaque v3 cursor")
+    try:
+        padding = "=" * (-len(value) % 4)
+        decoded = base64.b64decode(value + padding, altchars=b"-_", validate=True)
+        payload = json.loads(decoded)
+    except (ValueError, UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise ValueError("cursor must be an opaque v3 cursor") from error
+
+    if not isinstance(payload, dict) or type(payload.get("v")) is not int or payload["v"] != 3:
+        raise ValueError("cursor must be an opaque v3 cursor")
+
+    if set(payload) == {"v", "o"}:
+        offset = payload["o"]
+        if type(offset) is not int or offset < 0:
+            raise ValueError("cursor must be an opaque v3 cursor")
+        return value
+
+    if set(payload) == {"v", "public_id", "t"}:
+        public_id = payload["public_id"]
+        timestamp = payload["t"]
+        if not isinstance(public_id, str) or not isinstance(timestamp, str):
+            raise ValueError("cursor must be an opaque v3 cursor")
+        prefix, separator, suffix = public_id.partition("_")
+        if (
+            separator != "_"
+            or prefix not in PUBLIC_ID_PREFIXES
+            or re.fullmatch(PUBLIC_ID_SUFFIX_PATTERN, suffix) is None
+            or "T" not in timestamp
+            or not timestamp.endswith("Z")
+        ):
+            raise ValueError("cursor must be an opaque v3 cursor")
+        try:
+            datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
+        except ValueError as error:
+            raise ValueError("cursor must be an opaque v3 cursor") from error
+        return value
+
+    raise ValueError("cursor must be an opaque v3 cursor")
+
+
+CursorV3: TypeAlias = Annotated[str, AfterValidator(_validate_cursor_v3)]
+
+
 class BisibilityModel(BaseModel):
     model_config = ConfigDict(extra="allow", populate_by_name=True)
 
@@ -126,7 +206,7 @@ class ProblemDetails(BisibilityModel):
 
 
 class ListMeta(BisibilityModel):
-    next_cursor: str | None = None
+    next_cursor: CursorV3 | None = None
 
 
 class ListResponse(BisibilityModel, Generic[T]):
@@ -142,7 +222,7 @@ class DataResponse(BisibilityModel, Generic[T]):
 class Project(BisibilityModel):
     created_at: str
     domain: str
-    id: str
+    id: ProjectId
     name: str
     updated_at: str
     write_mode: ProjectWriteMode
@@ -154,11 +234,12 @@ class UpdateProjectInput(BisibilityModel):
 
 
 class LocationSuggestion(BisibilityModel):
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+
     city_name: str | None
     country_code: str
     display_name: str
     hl: str
-    id: str
     kind: LocationKind
     language_label: str
     location_key: str
@@ -176,7 +257,7 @@ class ProjectDefaults(BisibilityModel):
     last_checked_at: str | None
     location_key: str
     next_check_at: str | None
-    project_id: str
+    project_id: ProjectId
     serp_depth: Literal[10, 20, 50, 100]
     serp_stop_on_match: bool
     source: Literal["derived", "explicit", "fallback"]
@@ -209,7 +290,7 @@ class ProjectOverview(BisibilityModel):
     last_check_at: str | None
     next_check_at: str | None
     position_distribution: list[PositionDistributionBucket]
-    project_id: str
+    project_id: ProjectId
     top_10_count: int | None = Field(ge=0)
     top_10_delta: int | None
     top_100_count: int | None = Field(ge=0)
@@ -234,14 +315,14 @@ class CreateProjectInput(BisibilityModel):
 
 class MeProject(BisibilityModel):
     domain: str
-    id: str
+    id: ProjectId
     name: str
     role: TeamRoleValue
 
 
 class Me(BisibilityModel):
     email: str
-    id: str
+    id: UserId
     name: str | None = None
     projects: list[MeProject]
 
@@ -259,7 +340,7 @@ class PersonalAccessTokenCreateInput(BisibilityModel):
 class PersonalAccessToken(BisibilityModel):
     created_at: str
     expires_at: str | None
-    id: str
+    id: PersonalAccessTokenId
     last_used_at: str | None
     name: str
     prefix: str
@@ -278,7 +359,7 @@ class ApiKeyCreateInput(BisibilityModel):
 
 class ApiKey(BisibilityModel):
     created_at: str
-    id: str
+    id: KeyId
     last_used_at: str | None
     name: str
     prefix: str
@@ -303,12 +384,12 @@ class Keyword(BisibilityModel):
     country: str
     created_at: str
     device: Device
-    id: str
+    id: KeywordId
     intent: str | None = None
     latest_position: int | None
     location: str
     previous_position: int | None
-    project_id: str
+    project_id: ProjectId
     ranking_url: str | None
     schedule: KeywordSchedule | None
     tags: list[str]
@@ -332,7 +413,7 @@ class KeywordMatchMarket(BisibilityModel):
 
 
 class KeywordMatch(BisibilityModel):
-    keyword_id: str
+    keyword_id: KeywordId
     latest_position: int | None
     previous_position: int | None
     ranking_url: str | None = Field(
@@ -347,8 +428,7 @@ class KeywordMatch(BisibilityModel):
     )
     text: str = Field(
         description=(
-            "Stored keyword text, which can differ from matched_text "
-            "in case and whitespace."
+            "Stored keyword text, which can differ from matched_text in case and whitespace."
         )
     )
 
@@ -356,8 +436,7 @@ class KeywordMatch(BisibilityModel):
 class KeywordMatchMeta(BisibilityModel):
     truncated_texts: list[str] = Field(
         description=(
-            "Normalized texts with more than 100 matching markets. "
-            "Their returned rows are partial."
+            "Normalized texts with more than 100 matching markets. Their returned rows are partial."
         )
     )
 
@@ -368,7 +447,7 @@ class KeywordMatchResponse(BisibilityModel):
 
 
 class RankedKeywordConnection(BisibilityModel):
-    id: str
+    id: ConnectionId
     label: str
     provider: RankedKeywordProvider
 
@@ -572,7 +651,7 @@ class UpdateKeywordInput(BisibilityModel):
 
 
 class KeywordBulkInput(BisibilityModel):
-    keyword_ids: list[str]
+    keyword_ids: list[KeywordId]
     operation: KeywordBulkOperation
     frequency: RankCheckFrequency | None = None
     schedule: KeywordScheduleInput | None = None
@@ -581,7 +660,7 @@ class KeywordBulkInput(BisibilityModel):
 
 
 class KeywordBulkItemResult(BisibilityModel):
-    keyword_id: str
+    keyword_id: KeywordId
     status: str
 
 
@@ -600,8 +679,8 @@ class RankCheck(BisibilityModel):
     checked_at: str
     cost_cents: float | None
     error: str | None
-    id: str
-    keyword_id: str
+    id: CheckId
+    keyword_id: KeywordId
     position: int | None
     previous_position: int | None
     provider: str
@@ -611,9 +690,9 @@ class RankCheck(BisibilityModel):
 
 class RankHistoryExportRow(BisibilityModel):
     checked_at: str
-    id: str
+    id: CheckId
     keyword: str
-    keyword_id: str
+    keyword_id: KeywordId
     position: int | None
     previous_position: int | None
     ranking_url: str | None
@@ -629,11 +708,11 @@ class RunRankCheckInput(BisibilityModel):
 class Signal(BisibilityModel):
     created_at: str
     happened_at: str
-    id: str
-    keyword_id: str | None
+    id: SignalId
+    keyword_id: KeywordId | None
     payload: JsonObject | None
-    project_id: str
-    public_id: str
+    project_id: ProjectId
+    public_id: SignalId
     severity: SignalSeverity
     source: SignalSource
     type: str
@@ -641,20 +720,20 @@ class Signal(BisibilityModel):
 
 
 class AnalyticsConnection(BisibilityModel):
-    id: str
+    id: ConnectionId
     label: str
     provider: str
 
 
 class PageTrafficSnapshot(BisibilityModel):
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+
     bounce_rate: float | None
     created_at: str
     date: str
     engagement_rate: float | None
-    id: str
     key_events: float | None
     path: str
-    project_id: str
     provider: str
     scroll_depth: float | None
     sessions: int
@@ -685,7 +764,7 @@ class SearchPerformanceQueryStatsResponse(BisibilityModel):
 
 
 class TrafficSyncRun(BisibilityModel):
-    connection_id: str
+    connection_id: ConnectionId
     error: str | None = None
     error_class: str | None = None
     provider: str
@@ -705,14 +784,14 @@ class TrafficSyncSummary(BisibilityModel):
     connections: int
     keyword_snapshots: int
     page_snapshots: int
-    project_id: str
+    project_id: ProjectId
     runs: list[TrafficSyncRun]
     skipped: list[TrafficSyncSkipped]
 
 
 class CreateSignalInput(BisibilityModel):
     happened_at: str | datetime | None = None
-    keyword_id: str | None = None
+    keyword_id: KeywordId | None = None
     payload: JsonObject | None = None
     severity: SignalSeverity | None = None
     source: SignalCreateSource
@@ -720,8 +799,29 @@ class CreateSignalInput(BisibilityModel):
     url: str | None = None
 
 
+def _validate_alert_targets(
+    target_type: AlertTargetType | None,
+    target_ids: list[str] | None,
+) -> None:
+    if target_type is None:
+        if target_ids:
+            raise ValueError("target_type is required when target_ids are provided.")
+        return
+    if target_type == "all":
+        if target_ids:
+            raise ValueError("target_ids must be empty when target_type is 'all'.")
+        return
+    for index, target_id in enumerate(target_ids or []):
+        if target_type == "keyword":
+            require_public_id(target_id, "kw", field=f"target_ids[{index}]")
+        else:
+            require_public_id(target_id, "tag", field=f"target_ids[{index}]")
+
+
 class AlertRule(BisibilityModel):
-    id: str
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+
+    id: AlertRuleId
     change_pct: float | None = None
     channel: str | None = None
     channels: list[AlertChannel] | None = None
@@ -732,18 +832,25 @@ class AlertRule(BisibilityModel):
     fires: str | None = None
     name: str | None = None
     period: str | None = None
-    project_id: str | None = None
+    recipient_ids: list[UserId]
     scope: str | None = None
     serp_feature: str | None = None
     severity: str | None = None
     status: str | None = None
-    target_ids: list[str] | None = None
-    target_type: AlertTargetType | None = None
+    target_ids: list[KeywordId | TagId]
+    target_type: AlertTargetType
     threshold_position: int | None = None
     top_n: int | None = None
 
+    @model_validator(mode="after")
+    def validate_targets(self) -> AlertRule:
+        _validate_alert_targets(self.target_type, self.target_ids)
+        return self
+
 
 class AlertRuleInput(BisibilityModel):
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+
     channels: list[AlertChannel] | None = None
     change_pct: float | None = None
     competitor_domain: str | None = None
@@ -751,10 +858,16 @@ class AlertRuleInput(BisibilityModel):
     enabled: bool | None = None
     name: str
     serp_feature: str | None = None
-    target_ids: list[str] | None = None
+    recipient_ids: list[UserId] | None = None
+    target_ids: list[KeywordId | TagId] | None = None
     target_type: AlertTargetType | None = None
     threshold_position: int | None = None
     top_n: int | None = None
+
+    @model_validator(mode="after")
+    def validate_targets(self) -> AlertRuleInput:
+        _validate_alert_targets(self.target_type, self.target_ids)
+        return self
 
 
 class AlertRuleDeleteResult(BisibilityModel):
@@ -766,7 +879,7 @@ class TriggeredAlert(BisibilityModel):
     ctas: list[str] | None = None
     current: str | None = None
     headline: str | None = None
-    id: str
+    id: TriggeredAlertId
     keyword: str | None = None
     previous: str | None = None
     rule: str | None = None
@@ -787,7 +900,7 @@ class TriggeredAlertsReadResult(BisibilityModel):
 class TeamMember(BisibilityModel):
     color: str | None = None
     email: str
-    id: str
+    id: MemberId
     initials: str | None = None
     name: str | None = None
     role: str | None = None
@@ -797,7 +910,7 @@ class TeamMember(BisibilityModel):
 class TeamInvite(BisibilityModel):
     email: str
     expires_label: str | None = None
-    id: str
+    id: InviteId
     invited_label: str | None = None
     role: str | None = None
     role_value: TeamInviteRole | None = None
@@ -810,22 +923,22 @@ class CreateTeamInviteInput(BisibilityModel):
 
 class CreatedTeamInvite(BisibilityModel):
     expires_at: str
-    id: str
+    id: InviteId
     invite_link: str
 
 
 class RevokedTeamInvite(BisibilityModel):
-    id: str
+    id: InviteId
 
 
 class TeamInviteResendResult(BisibilityModel):
     expires_at: str
-    id: str
+    id: InviteId
     invite_link: str
 
 
 class TeamMemberMutationResult(BisibilityModel):
-    id: str
+    id: MemberId
 
 
 class TeamMemberRolePatch(BisibilityModel):
@@ -833,22 +946,23 @@ class TeamMemberRolePatch(BisibilityModel):
 
 
 class TeamMemberRoleResult(BisibilityModel):
-    id: str
+    id: MemberId
     role: TeamInviteRole
 
 
 class SitemapSnapshotSummary(BisibilityModel):
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+
     fetched_at: str
-    id: str
     sitemap_url: str
     url_count: int = Field(ge=0)
 
 
 class SitemapMonitor(BisibilityModel):
     enabled: bool
-    id: str
+    id: ProjectId
     latest_snapshot: SitemapSnapshotSummary | None
-    project_id: str
+    project_id: ProjectId
     sitemap_url: str | None
     status: SitemapMonitorStatus
 
@@ -932,6 +1046,7 @@ class Provider(BisibilityModel):
     enabled: bool | None = None
     icon: str | None = None
     id: str
+    connection_id: ConnectionId | None = None
     logo_domain: str | None = None
     meta: list[ProviderMetaRow] | None = None
     name: str | None = None
@@ -943,7 +1058,7 @@ class Provider(BisibilityModel):
 
 
 class ProviderConnection(BisibilityModel):
-    id: str
+    id: ConnectionId
     cost_per_check_cents: float | None = None
     created_at: str | None = None
     credentials_hash: str | None = None
@@ -952,7 +1067,7 @@ class ProviderConnection(BisibilityModel):
     kind: ProviderKind | str | None = None
     last_used_at: str | None = None
     priority: int | None = None
-    project_id: str | None = None
+    project_id: ProjectId | None = None
     provider: ProviderId | str | None = None
     status: str | None = None
     updated_at: str | None = None
@@ -997,8 +1112,8 @@ class CreateSavedViewInput(BisibilityModel):
 class SavedView(BisibilityModel):
     config: SavedViewConfig
     created_at: str
-    created_by_id: str | None
-    id: str
+    created_by_id: UserId | None
+    id: ViewId
     name: str
 
 
@@ -1013,14 +1128,14 @@ class AddCompetitorInput(BisibilityModel):
 
 class Competitor(BisibilityModel):
     domain: str
-    id: str
+    id: CompetitorId
     initials: str | None = None
     label: str | None = None
 
 
 class CompetitorColumn(BisibilityModel):
     domain: str
-    id: str | None = None
+    id: CompetitorId | None = None
     kind: str
     label: str
 
@@ -1028,7 +1143,7 @@ class CompetitorColumn(BisibilityModel):
 class CompetitorShare(BisibilityModel):
     color: str
     domain: str
-    id: str | None = None
+    id: CompetitorId | None = None
     initials: str
     kind: str
     label: str
@@ -1089,7 +1204,7 @@ class NotificationPreferences(BisibilityModel):
     import_in_app: bool
     invite_email: bool
     invite_in_app: bool
-    project_id: str
+    project_id: ProjectId
     slack_available: bool | None = None
     webhook_available: bool | None = None
 
@@ -1111,7 +1226,7 @@ class Webhook(BisibilityModel):
     created_at: str
     description: str | None
     enabled: bool
-    id: str
+    id: WebhookEndpointId
     last_delivery_at: str | None
     updated_at: str
     url: str
@@ -1146,69 +1261,247 @@ class CloudImportJob(BisibilityModel):
     created_at: str | None = None
     error: str | None = None
     finished_at: str | None = None
-    id: str | None = None
+    id: CloudImportId | None = None
     progress: int
     started_at: str | None = None
-    state: CloudImportState | str
+    state: CloudImportState
 
 
 class CloudImportCompatibility(BisibilityModel):
     app_version: str
     latest_migration: str | None
-    schema_versions_supported: list[int]
+    schema_versions_supported: list[Literal[5]]
 
 
-class CloudImportPackage(BisibilityModel):
-    """Full export package accepted by ``POST /cloud/import``.
+CloudImportMarket: TypeAlias = Literal[
+    "United States",
+    "United Kingdom",
+    "Canada",
+    "Australia",
+    "Germany",
+    "France",
+    "Spain",
+    "Italy",
+    "Netherlands",
+    "Sweden",
+    "Poland",
+    "Ireland",
+    "Portugal",
+    "Belgium",
+    "Switzerland",
+    "Austria",
+    "Denmark",
+    "Norway",
+    "Finland",
+    "Brazil",
+    "Mexico",
+    "India",
+    "Japan",
+    "Singapore",
+    "New Zealand",
+    "South Africa",
+    "United Arab Emirates",
+]
+CloudImportAlertConditionType: TypeAlias = Literal[
+    "change_pct",
+    "competitor_overtake",
+    "ctr_drop",
+    "downtrend",
+    "enters_top_n",
+    "exits_top_n",
+    "position_drop",
+    "serp_feature",
+    "threshold",
+    "url_mismatch",
+]
+CloudImportAlertTargetType: TypeAlias = Literal["all", "keyword", "tag"]
+CloudImportSavedViewSurface: TypeAlias = Literal["keywords", "competitors"]
+CloudImportPosition: TypeAlias = Annotated[int | None, Field(ge=1)]
+CloudImportTargetUrl: TypeAlias = Annotated[str | None, Field(max_length=500)]
 
-    The API accepts additional, section-specific keys (keywords, competitors,
-    saved views, alert rules, notification preferences and history rows); only
-    the top-level envelope fields are typed here. Unknown keys are preserved.
-    """
 
-    version: int | None = None
-    scope: Literal["current", "history"] | None = None
-    project_id: str | None = None
+class CloudImportModel(BisibilityModel):
+    """Strict model base for the versioned cloud-import contract."""
+
+    model_config = ConfigDict(extra="forbid", populate_by_name=False)
+
+
+class CloudImportV5Model(CloudImportModel):
+    version: Literal[5]
+
+    @field_validator("version", mode="before")
+    @classmethod
+    def validate_version_type(cls, value: Any) -> Any:
+        if type(value) is not int:
+            raise ValueError("version must be the integer 5")
+        return value
+
+
+class CloudImportRankingHistory(CloudImportModel):
+    checkedAt: str
+    position: CloudImportPosition = None
+    previousPosition: CloudImportPosition = None
+    rankingUrl: CloudImportTargetUrl = None
+
+
+class CloudImportKeyword(CloudImportModel):
+    device: Device
+    id: KeywordId
+    keyword: Annotated[str, Field(min_length=1, max_length=180)]
+    location: CloudImportMarket
+    rankingHistory: Annotated[list[CloudImportRankingHistory], Field(max_length=5000)] | None = None
+    tags: (
+        Annotated[list[Annotated[str, Field(min_length=1, max_length=48)]], Field(max_length=12)]
+        | None
+    ) = None
+    target_url: CloudImportTargetUrl = None
+
+
+class CloudImportCompetitor(CloudImportModel):
+    domain: Annotated[str, Field(min_length=1, max_length=253)]
+    id: CompetitorId
+    label: Annotated[str, Field(max_length=80)] | None = None
+
+
+class CloudImportKeywordAlertTarget(CloudImportModel):
+    keyword_id: KeywordId
+    type: Literal["keyword"]
+    device: Device | None = None
+    keyword: Annotated[str, Field(min_length=1, max_length=180)] | None = None
+    location: CloudImportMarket | None = None
+
+
+class CloudImportTagAlertTarget(CloudImportModel):
+    tag: Annotated[str, Field(min_length=1, max_length=80)]
+    type: Literal["tag"]
+
+
+CloudImportAlertRuleTarget: TypeAlias = Annotated[
+    CloudImportKeywordAlertTarget | CloudImportTagAlertTarget,
+    Field(discriminator="type"),
+]
+
+
+class CloudImportAlertRule(CloudImportModel):
+    id: AlertRuleId
+    name: Annotated[str, Field(min_length=1, max_length=120)]
+    change_pct: float | None = None
+    channels: list[AlertChannel] | None = None
+    competitor_domain: str | None = None
+    condition_type: CloudImportAlertConditionType | None = None
+    drop_positions: CloudImportPosition = None
+    enabled: bool | None = None
+    serp_feature: str | None = None
+    target_type: CloudImportAlertTargetType | None = None
+    targets: Annotated[list[CloudImportAlertRuleTarget], Field(max_length=1000)] | None = None
+    threshold_position: CloudImportPosition = None
+    top_n: CloudImportPosition = None
+
+
+class CloudImportNotificationPreference(CloudImportModel):
+    alert_email: bool | None = None
+    alert_in_app: bool | None = None
+    check_email: bool | None = None
+    check_in_app: bool | None = None
+    import_email: bool | None = None
+    import_in_app: bool | None = None
+    invite_email: bool | None = None
+    invite_in_app: bool | None = None
+    report_email: bool | None = None
+
+
+class CloudImportSavedView(CloudImportModel):
+    id: ViewId
+    name: Annotated[str, Field(min_length=1, max_length=120)]
+    config: Any | None = None
+    surface: CloudImportSavedViewSurface | None = None
+
+
+class CloudImportPackage(CloudImportV5Model):
+    """Exact version-5 export package accepted by ``POST /cloud/import``."""
+
+    project_id: ProjectId
+    keywords: Annotated[list[CloudImportKeyword], Field(max_length=500)]
+    alert_rules: Annotated[list[CloudImportAlertRule], Field(max_length=500)]
+    competitors: Annotated[list[CloudImportCompetitor], Field(max_length=500)]
+    notification_preferences: Annotated[
+        list[CloudImportNotificationPreference], Field(max_length=50)
+    ]
+    saved_views: Annotated[list[CloudImportSavedView], Field(max_length=500)]
     exported_at: str | None = None
+    scope: Literal["current", "history"] | None = None
 
 
-class CloudImportCounts(BisibilityModel):
-    model_config = ConfigDict(extra="allow")
+CloudImportCounts: TypeAlias = dict[str, int]
 
 
 class CloudImportFinalizeResponse(BisibilityModel):
-    counts: JsonObject
-    job_id: str
-    state: Literal["done"] | str
+    counts: CloudImportCounts
+    job_id: CloudImportId
+    state: Literal["done"]
 
 
-class CloudImportSessionTotals(BisibilityModel):
-    keywords: int | None = None
-    rank_checks: int | None = None
+class CloudImportSessionTotals(CloudImportModel):
+    keywords: int | None = Field(default=None, ge=0)
+    rank_checks: int | None = Field(default=None, ge=0)
 
 
-class CloudImportSessionCreate(BisibilityModel):
-    version: int
-    chunk_count: int
+class CloudImportSessionCreate(CloudImportV5Model):
+    chunk_count: int = Field(ge=1, le=500)
+    source_project_id: ProjectId
     totals: CloudImportSessionTotals | None = None
 
 
 class CloudImportChunkLimits(BisibilityModel):
-    max_body_bytes: int
-    max_history_rows: int
-    max_keywords: int
+    max_body_bytes: int = Field(ge=1)
+    max_history_rows: int = Field(ge=1)
+    max_keywords: int = Field(ge=1)
 
 
 class CloudImportSessionCreateResponse(BisibilityModel):
     chunk_limits: CloudImportChunkLimits
-    session_id: str
-    state: Literal["receiving"] | str
+    session_id: CloudImportId
+    state: Literal["receiving"]
 
 
 class CloudImportChunkResponse(BisibilityModel):
-    chunk_count: int
-    chunks_received: int
-    state: Literal["receiving"] | str
+    chunk_count: int = Field(ge=1)
+    chunks_received: int = Field(ge=0)
+    state: Literal["receiving"]
+
+
+class CloudImportSourceKeyword(CloudImportModel):
+    device: Device
+    location: CloudImportMarket
+    text: str
+
+
+class CloudImportSessionSections(CloudImportModel):
+    alert_rules: Annotated[list[CloudImportAlertRule], Field(max_length=500)] | None = None
+    competitors: Annotated[list[CloudImportCompetitor], Field(max_length=500)] | None = None
+    notification_preferences: (
+        Annotated[list[CloudImportNotificationPreference], Field(max_length=50)] | None
+    ) = None
+    saved_views: Annotated[list[CloudImportSavedView], Field(max_length=500)] | None = None
+    source_keyword_ids: dict[str, CloudImportSourceKeyword] | None = None
+
+
+class CloudImportKeywordUploadChunk(CloudImportModel):
+    checksum: Annotated[str, Field(pattern=r"^sha256:[0-9a-f]{64}$")]
+    kind: Literal["keywords"]
+    keywords: Annotated[list[CloudImportKeyword], Field(max_length=500)]
+
+
+class CloudImportSectionsUploadChunk(CloudImportModel):
+    checksum: Annotated[str, Field(pattern=r"^sha256:[0-9a-f]{64}$")]
+    kind: Literal["sections"]
+    sections: CloudImportSessionSections
+
+
+CloudImportUploadChunk: TypeAlias = Annotated[
+    CloudImportKeywordUploadChunk | CloudImportSectionsUploadChunk,
+    Field(discriminator="kind"),
+]
 
 
 class MigrationTokenCreator(BisibilityModel):
@@ -1220,7 +1513,7 @@ class MigrationToken(BisibilityModel):
     created_at: str
     created_by: MigrationTokenCreator | None = None
     expires_at: str
-    id: str
+    id: TransferTokenId
     scope: MigrationScope
     single_use: bool
 
@@ -1243,7 +1536,7 @@ class ListMigrationTokensResponse(ListResponse[MigrationToken]):
 
 
 class MigrationTokenRevokeResult(BisibilityModel):
-    id: str
+    id: TransferTokenId
     revoked_at: str
 
 
@@ -1331,7 +1624,7 @@ class OpenApiDocument(BisibilityModel):
 
 
 class PaginationOptions(BisibilityModel):
-    cursor: str | None = None
+    cursor: CursorV3 | None = None
     limit: int | None = None
 
 
@@ -1342,7 +1635,7 @@ class SearchLocationsOptions(BisibilityModel):
 
 
 class ListRankedKeywordSuggestionsOptions(BisibilityModel):
-    connection_id: str | None = None
+    connection_id: ConnectionId | None = None
     fresh: bool | None = None
     limit: int | None = Field(default=None, ge=1, le=100)
     offset: int | None = Field(default=None, ge=0, le=900, multiple_of=100)
@@ -1350,7 +1643,7 @@ class ListRankedKeywordSuggestionsOptions(BisibilityModel):
 
 class KeywordResearchOptions(BisibilityModel):
     seed: str = Field(min_length=1, max_length=80)
-    connection_id: str | None = None
+    connection_id: ConnectionId | None = None
     estimate_only: bool | None = None
     fresh: bool | None = None
     include_clickstream: bool | None = None
@@ -1381,7 +1674,7 @@ class KeywordMetricsInput(BisibilityModel):
     keywords: list[Annotated[str, Field(min_length=1, max_length=80)]] = Field(
         min_length=1, max_length=700
     )
-    connection_id: str | None = None
+    connection_id: ConnectionId | None = None
     estimate_only: bool | None = None
     fresh: bool | None = None
     include_clickstream: bool | None = None
@@ -1399,7 +1692,7 @@ class ListTrafficSnapshotsOptions(BisibilityModel):
 class ListSearchPerformanceQueryStatsOptions(BisibilityModel):
     start_date: str | date
     end_date: str | date
-    connection_id: str | None = None
+    connection_id: ConnectionId | None = None
     limit: int | None = Field(default=None, ge=1, le=1000)
     query: str | None = Field(default=None, max_length=1000)
 
@@ -1431,7 +1724,7 @@ class ListRankChecksOptions(PaginationOptions):
 class RankHistoryExportOptions(PaginationOptions):
     format: RankHistoryExportFormat | None = None
     granularity: RankHistoryGranularity | None = None
-    keyword_ids: list[str] | None = Field(default=None, max_length=500)
+    keyword_ids: list[KeywordId] | None = Field(default=None, max_length=500)
     range: RankHistoryRange | None = None
 
 

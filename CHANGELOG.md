@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## 0.4.0 - 2026-07-29
+
+- Adopt the strict public ID v3 registry and reject legacy or malformed opaque cursors.
+- Accept `bsb_key_live_`, `bsb_key_test_`, and `bsb_pat_live_` credentials while rejecting the
+  retired `bsk_` and `bsp_` formats.
+- Update cloud transfer models to package version 5.
+
 ## 0.3.1 - 2026-07-28
 
 - Use nullable `ranking_url` to identify which result URL a stored keyword position belongs to

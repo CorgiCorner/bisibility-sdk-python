@@ -8,7 +8,7 @@
 > [API reference](https://bisibility.com/docs/api/overview) ·
 > [Roadmap](https://bisibility.com/roadmap)
 >
-> **Status:** In development; not yet published to PyPI.
+> **Status:** Published on PyPI as v0.4.0.
 
 Python SDK for the Bisibility REST API.
 
@@ -59,11 +59,14 @@ if project_id:
 ## Configuration
 
 ```python
+import os
+
 from bisibility import BisibilityClient
 
 bisibility = BisibilityClient(
-    api_key="bsk_live_...",
+    api_key=os.environ["BISIBILITY_API_KEY"],
     base_url="https://bisibility.com/api/v1",
+    project_id=os.environ.get("BISIBILITY_PROJECT_ID"),
     timeout=30.0,
 )
 ```
@@ -72,11 +75,39 @@ bisibility = BisibilityClient(
 `Authorization: Bearer <api_key>`. Write methods accept `RequestOptions` with an
 `idempotency_key`, which maps to the server `Idempotency-Key` header.
 
-The client accepts project API keys (`bsk_live_...`) and personal access tokens
-(`bsp_live_...`). For a PAT with multiple project memberships, pass
-`project_id="prj_abc123"` to send `X-Bisibility-Project` on project-implicit
-routes. PAT methods include `get_me`, `create_project`, personal-token
-self-management, project API-key minting, and webhook CRUD.
+The client accepts project API keys (`bsb_key_live_...` or `bsb_key_test_...`) and
+personal access tokens (`bsb_pat_live_...`). For a PAT with multiple project memberships,
+set `project_id` to a project ID returned by `list_projects`; the client sends it
+as `X-Bisibility-Project` on project-implicit routes. PAT methods include
+`get_me`, `create_project`, personal-token self-management, project API-key
+minting, and webhook CRUD.
+
+Legacy `bsk_...` and `bsp_...` credentials are not accepted by the v3 contract.
+
+### Public IDs and cursors v3
+
+Every resource identifier at the HTTP boundary is a strict lowercase public ID:
+`<prefix>_[a-z][a-z0-9]{23}`. The SDK rejects raw database IDs, legacy IDs,
+wrong prefixes, uppercase characters, and malformed suffixes before sending a
+request. The same validation is applied to typed request bodies, project header,
+and ID-bearing API responses. A malformed success response raises
+`BisibilityResponseError`.
+
+The registry is fixed to: `al`, `alr`, `audit`, `check`, `cmp`, `conn`, `dwh`,
+`ferry`, `imp`, `inv`, `key`, `kw`, `mbr`, `ntf`, `pat`, `prj`, `sid`, `sig`,
+`svkw`, `tag`, `usr`, `viw`, and `we`. Import
+`PUBLIC_ID_PREFIXES` or `public_id_pattern()` when another component needs the
+same contract.
+
+List operations accept and return opaque v3 cursors. Pass `meta.next_cursor`
+back unchanged; the SDK rejects legacy, unversioned, and malformed cursors
+before a request is sent or a success response is returned.
+
+Cloud transfer uses package version 5 only. Its project, cloud-import, and
+transfer-token identifiers follow the same public-ID rules.
+
+The examples below reuse `project_id` and `keyword_id` values returned by the
+API, as shown in the quickstart, instead of embedding synthetic resource IDs.
 
 The default timeout is 30 seconds per attempt. Pass `timeout=None` to the client
 to opt out globally, or `RequestOptions(timeout=None)` for one request. The SDK
@@ -96,7 +127,7 @@ waits that long (capped at 60 seconds); otherwise it uses capped exponential
 backoff (0.5s, 1s, 2s, ... up to 8s). Set `max_retries=0` to disable retries.
 
 ```python
-bisibility = BisibilityClient(api_key="bsk_live_...", max_retries=3)
+bisibility = BisibilityClient(api_key="bsb_key_live_...", max_retries=3)
 ```
 
 ```python
@@ -142,6 +173,41 @@ bisibility.create_api_key(
 - Notification preferences: `get_notification_preferences`, `update_notification_preferences`
 - Migration tokens: `list_migration_tokens`, `mint_migration_token`,
   `revoke_project_migration_token`, `revoke_migration_token`
+- Cloud import: `get_cloud_import_compatibility`, `import_cloud_export`,
+  `create_cloud_import_session`, `upload_cloud_import_chunk`,
+  `finalize_cloud_import_session`
+
+### Cloud import v5
+
+Cloud import accepts only version 5 packages. Every package must use strict
+snake_case top-level keys and include all five section arrays, even when they
+are empty. Package, session, chunk, and response identifiers are validated as
+typed public IDs before a request is sent.
+
+```python
+from bisibility import CloudImportPackage, CloudImportSessionCreate
+
+package = CloudImportPackage(
+    version=5,
+    project_id=project_id,
+    keywords=[],
+    alert_rules=[],
+    competitors=[],
+    notification_preferences=[],
+    saved_views=[],
+)
+
+session = CloudImportSessionCreate(
+    version=5,
+    chunk_count=1,
+    source_project_id=project_id,
+)
+```
+
+The nested `CloudImportKeyword`, `CloudImportCompetitor`, `CloudImportAlertRule`,
+`CloudImportNotificationPreference`, and `CloudImportSavedView` models mirror
+the API schema. Alert targets are a discriminated union with `type="keyword"`
+or `type="tag"`; arbitrary fields and legacy aliases are rejected.
 
 List methods return `ListResponse[T]` with `data` and `meta.next_cursor`. Resource
 methods return pydantic models matching the Bisibility API response shape.
@@ -158,7 +224,7 @@ the supplied filters, request pages only as needed, and stop when
 from bisibility import ListKeywordsOptions
 
 for keyword in bisibility.iter_keywords(
-    "prj_123",
+    project_id,
     ListKeywordsOptions(tag="Product", limit=100),
 ):
     print(keyword.text)
@@ -211,7 +277,7 @@ emitted = bisibility.create_signal(
 )
 
 signals = bisibility.list_project_signals(
-    "prj_123",
+    project_id,
     ListSignalsOptions(source="deploy", from_="2026-07-01T00:00:00Z"),
 )
 ```
@@ -245,7 +311,7 @@ print(estimate.data.monthly_cost_usd)
 `get_rank_check_result` until the status becomes `"completed"` or `"failed"`.
 
 ```python
-queued = bisibility.run_rank_check("kw_123", async_mode=True)
+queued = bisibility.run_rank_check(keyword_id, async_mode=True)
 assert queued.status == "running"
 
 result = bisibility.get_rank_check_result(queued.id)
@@ -260,7 +326,7 @@ available when you want validation and editor completion.
 from bisibility import CreateKeywordInput, CreateKeywordsBatch, KeywordScheduleInput
 
 created = bisibility.create_keywords(
-    "prj_123",
+    project_id,
     CreateKeywordsBatch(
         keywords=[
             CreateKeywordInput(
@@ -289,17 +355,19 @@ from bisibility import (
     UpdateProjectInput,
 )
 
-project = bisibility.update_project("prj_123", UpdateProjectInput(name="Marketing site"))
+project = bisibility.update_project(
+    project_id, UpdateProjectInput(name="Marketing site")
+)
 
 defaults = bisibility.update_project_defaults(
-    "prj_123",
+    project_id,
     ProjectDefaultsPatch(frequency="daily", location_key="US/Texas/Austin"),
 )
 
 api_key = bisibility.create_api_key(ApiKeyCreateInput(name="CI"))
 
 rule = bisibility.create_alert_rule(
-    "prj_123",
+    project_id,
     AlertRuleInput(
         channels=["email"],
         condition_type="threshold",
@@ -310,7 +378,7 @@ rule = bisibility.create_alert_rule(
 )
 
 provider = bisibility.connect_provider(
-    "prj_123",
+    project_id,
     "serpapi",
     ConnectProviderInput(
         credentials=ProviderCredentialsInput(api_key="serpapi-secret"),
@@ -321,7 +389,7 @@ provider = bisibility.connect_provider(
 # Self-hosted analytics providers (e.g. "plausible") accept an optional
 # endpoint credential pointing at the instance API.
 analytics = bisibility.connect_provider(
-    "prj_123",
+    project_id,
     "plausible",
     ConnectProviderInput(
         credentials=ProviderCredentialsInput(
@@ -341,7 +409,7 @@ available on `error.problem` when the server returns one.
 from bisibility import BisibilityApiError
 
 try:
-    bisibility.get_keyword("kw_missing")
+    bisibility.get_keyword("kw_z9y8x7w6v5u4t3s2r1q0p9n8")
 except BisibilityApiError as error:
     print(error.status, error.problem.detail if error.problem else error.body)
 ```

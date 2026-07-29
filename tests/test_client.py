@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -10,6 +11,7 @@ import pytest
 from pydantic import ValidationError
 
 from bisibility import (
+    PUBLIC_ID_PREFIXES,
     AddCompetitorInput,
     AlertRuleInput,
     AnalyzeBacklinksOptions,
@@ -20,8 +22,10 @@ from bisibility import (
     BisibilityError,
     BisibilityNetworkError,
     BisibilityResponseError,
+    CloudImportFinalizeResponse,
     CloudImportPackage,
     CloudImportSessionCreate,
+    CloudImportSessionCreateResponse,
     ConnectProviderInput,
     CostEstimateOptions,
     CreateKeywordInput,
@@ -45,8 +49,10 @@ from bisibility import (
     ListSignalsOptions,
     ListTrafficSnapshotsOptions,
     LoadMoreBacklinkRowsOptions,
+    LocationSuggestion,
     MintMigrationTokenInput,
     NotificationPreferencesPatch,
+    PageTrafficSnapshot,
     PositionDistributionBucket,
     Project,
     ProjectDefaults,
@@ -65,12 +71,13 @@ from bisibility import (
     UpdateProjectInput,
     WebhookUpdateInput,
     create_bisibility_client,
+    public_id_pattern,
 )
 from bisibility import (
     TestProviderConnectionInput as ProviderConnectionTestInput,
 )
 
-API_KEY = "bsk_live_1234567890abcdef"
+API_KEY = "bsb_key_live_1234567890abcdef"
 
 
 def json_response(
@@ -98,7 +105,7 @@ def project(**overrides: Any) -> dict[str, Any]:
     return {
         "created_at": "2026-01-01T00:00:00.000Z",
         "domain": "example.com",
-        "id": "prj_1",
+        "id": "prj_a00000000000000000000000",
         "name": "Example",
         "updated_at": "2026-01-02T00:00:00.000Z",
         "write_mode": "active",
@@ -106,13 +113,110 @@ def project(**overrides: Any) -> dict[str, Any]:
     }
 
 
+def cloud_import_package(**overrides: Any) -> dict[str, Any]:
+    package: dict[str, Any] = {
+        "version": 5,
+        "project_id": "prj_a00000000000000000000000",
+        "keywords": [
+            {
+                "id": "kw_a00000000000000000000000",
+                "keyword": "rank tracker api",
+                "device": "desktop",
+                "location": "United States",
+                "rankingHistory": [
+                    {
+                        "checkedAt": "2026-07-27T12:00:00Z",
+                        "position": 3,
+                        "previousPosition": 4,
+                        "rankingUrl": "https://example.com/rank-tracker",
+                    }
+                ],
+                "tags": ["api"],
+                "target_url": "https://example.com/rank-tracker",
+            }
+        ],
+        "alert_rules": [
+            {
+                "id": "alr_a00000000000000000000000",
+                "name": "Position drop",
+                "change_pct": 10,
+                "channels": ["email", "slack", "webhook"],
+                "competitor_domain": "example.org",
+                "condition_type": "position_drop",
+                "drop_positions": 2,
+                "enabled": True,
+                "serp_feature": "featured_snippet",
+                "target_type": "keyword",
+                "targets": [
+                    {
+                        "type": "keyword",
+                        "keyword_id": "kw_a00000000000000000000000",
+                        "keyword": "rank tracker api",
+                        "device": "desktop",
+                        "location": "United States",
+                    }
+                ],
+                "threshold_position": 10,
+                "top_n": 3,
+            }
+        ],
+        "competitors": [
+            {
+                "id": "cmp_a00000000000000000000000",
+                "domain": "example.org",
+                "label": "Example competitor",
+            }
+        ],
+        "notification_preferences": [
+            {
+                "alert_email": True,
+                "alert_in_app": True,
+                "check_email": False,
+                "check_in_app": True,
+                "import_email": True,
+                "import_in_app": True,
+                "invite_email": False,
+                "invite_in_app": True,
+                "report_email": False,
+            }
+        ],
+        "saved_views": [
+            {
+                "id": "viw_a00000000000000000000000",
+                "name": "Priority keywords",
+                "config": {"filters": {"tags": ["api"]}},
+                "surface": "keywords",
+            }
+        ],
+    }
+    package.update(overrides)
+    return package
+
+
+def cloud_import_sections() -> dict[str, Any]:
+    package = cloud_import_package()
+    return {
+        "alert_rules": package["alert_rules"],
+        "competitors": package["competitors"],
+        "notification_preferences": package["notification_preferences"],
+        "saved_views": package["saved_views"],
+        "source_keyword_ids": {
+            "legacy-keyword-1": {
+                "text": "rank tracker api",
+                "device": "desktop",
+                "location": "United States",
+            }
+        },
+    }
+
+
 def api_key_resource(**overrides: Any) -> dict[str, Any]:
     return {
         "created_at": "2026-01-01T00:00:00.000Z",
-        "id": "key_1",
+        "id": "key_a00000000000000000000000",
         "last_used_at": None,
         "name": "Production",
-        "prefix": "bsk_live_12345678",
+        "prefix": "bsb_key_live_12345678",
         "revoked_at": None,
         **overrides,
     }
@@ -122,10 +226,10 @@ def personal_token_resource(**overrides: Any) -> dict[str, Any]:
     return {
         "created_at": "2026-07-12T00:00:00.000Z",
         "expires_at": None,
-        "id": "pat_1",
+        "id": "pat_a00000000000000000000000",
         "last_used_at": None,
         "name": "CLI",
-        "prefix": "bsp_live_example",
+        "prefix": "bsb_pat_live_example",
         "revoked_at": None,
         "scope": "admin",
         **overrides,
@@ -137,7 +241,7 @@ def webhook_resource(**overrides: Any) -> dict[str, Any]:
         "created_at": "2026-07-12T00:00:00.000Z",
         "description": "CI",
         "enabled": True,
-        "id": "wh_1",
+        "id": "we_a00000000000000000000000",
         "last_delivery_at": None,
         "updated_at": "2026-07-12T00:00:00.000Z",
         "url": "https://example.com/hook",
@@ -156,7 +260,7 @@ def project_defaults(**overrides: Any) -> dict[str, Any]:
         "last_checked_at": None,
         "location_key": "US",
         "next_check_at": "2026-01-05T00:00:00.000Z",
-        "project_id": "prj_1",
+        "project_id": "prj_a00000000000000000000000",
         "serp_depth": 100,
         "serp_stop_on_match": True,
         "source": "explicit",
@@ -177,7 +281,7 @@ def project_overview(**overrides: Any) -> dict[str, Any]:
             {"count": 4, "max": 3, "min": 1},
             {"count": None, "max": 10, "min": 4},
         ],
-        "project_id": "prj_1",
+        "project_id": "prj_a00000000000000000000000",
         "top_10_count": 8,
         "top_10_delta": 2,
         "top_100_count": 17,
@@ -193,7 +297,7 @@ def keyword_match_response(**overrides: Any) -> dict[str, Any]:
     return {
         "data": [
             {
-                "keyword_id": "kw_1",
+                "keyword_id": "kw_a00000000000000000000000",
                 "latest_position": 3,
                 "previous_position": None,
                 "ranking_url": "https://example.com/headless-cms",
@@ -217,12 +321,12 @@ def keyword(**overrides: Any) -> dict[str, Any]:
         "country": "United States",
         "created_at": "2026-01-03T00:00:00.000Z",
         "device": "desktop",
-        "id": "kw_1",
+        "id": "kw_a00000000000000000000000",
         "intent": None,
         "latest_position": 4,
         "location": "United States",
         "previous_position": 8,
-        "project_id": "prj_1",
+        "project_id": "prj_a00000000000000000000000",
         "ranking_url": "https://example.com/page",
         "schedule": None,
         "tags": ["Product"],
@@ -240,8 +344,8 @@ def rank_check(**overrides: Any) -> dict[str, Any]:
         "checked_at": "2026-01-06T00:00:00.000Z",
         "cost_cents": 0.06,
         "error": None,
-        "id": "check_1",
-        "keyword_id": "kw_1",
+        "id": "check_a00000000000000000000000",
+        "keyword_id": "kw_a00000000000000000000000",
         "position": 4,
         "previous_position": 8,
         "provider": "dataforseo",
@@ -254,9 +358,9 @@ def rank_check(**overrides: Any) -> dict[str, Any]:
 def rank_history_export_row(**overrides: Any) -> dict[str, Any]:
     return {
         "checked_at": "2026-07-20T10:00:00.000Z",
-        "id": "check_1",
+        "id": "check_a00000000000000000000000",
         "keyword": "rank tracker",
-        "keyword_id": "kw_1",
+        "keyword_id": "kw_a00000000000000000000000",
         "position": 4,
         "previous_position": 7,
         "ranking_url": "https://example.com/rank",
@@ -269,8 +373,9 @@ def alert_rule(**overrides: Any) -> dict[str, Any]:
         "channels": ["email"],
         "condition_type": "threshold",
         "enabled": True,
-        "id": "rule_1",
+        "id": "alr_a00000000000000000000000",
         "name": "Ranking drop",
+        "recipient_ids": [],
         "target_ids": [],
         "target_type": "all",
         "threshold_position": 10,
@@ -284,7 +389,7 @@ def triggered_alert(**overrides: Any) -> dict[str, Any]:
         "ctas": ["Open keyword"],
         "current": "#12",
         "headline": "Ranking drop",
-        "id": "ta_1",
+        "id": "al_a00000000000000000000000",
         "keyword": "rank tracker",
         "previous": "#4",
         "rule": "Ranking drop",
@@ -298,14 +403,13 @@ def triggered_alert(**overrides: Any) -> dict[str, Any]:
 def sitemap_monitor(**overrides: Any) -> dict[str, Any]:
     return {
         "enabled": True,
-        "id": "prj_1",
+        "id": "prj_a00000000000000000000000",
         "latest_snapshot": {
             "fetched_at": "2026-07-21T04:45:00.000Z",
-            "id": "snapshot_1",
             "sitemap_url": "https://example.com/sitemap.xml",
             "url_count": 42,
         },
-        "project_id": "prj_1",
+        "project_id": "prj_a00000000000000000000000",
         "sitemap_url": "https://example.com/sitemap.xml",
         "status": "active",
         **overrides,
@@ -316,7 +420,7 @@ def team_member(**overrides: Any) -> dict[str, Any]:
     return {
         "color": "accent",
         "email": "owner@example.com",
-        "id": "mem_1",
+        "id": "mbr_a00000000000000000000000",
         "initials": "OE",
         "name": "Owner Example",
         "role": "Owner",
@@ -329,7 +433,7 @@ def team_invite(**overrides: Any) -> dict[str, Any]:
     return {
         "email": "new@example.com",
         "expires_label": "expires in 6d",
-        "id": "inv_1",
+        "id": "inv_a00000000000000000000000",
         "invited_label": "invited just now",
         "role": "Viewer",
         "role_value": "viewer",
@@ -382,12 +486,12 @@ def provider_connection(**overrides: Any) -> dict[str, Any]:
         "cost_per_check_cents": 0.01,
         "created_at": "2026-01-01T00:00:00.000Z",
         "enabled": True,
-        "id": "pc_1",
+        "id": "conn_a00000000000000000000000",
         "is_primary": False,
         "kind": "serp",
         "last_used_at": None,
         "priority": 100,
-        "project_id": "prj_1",
+        "project_id": "prj_a00000000000000000000000",
         "provider": "serpapi",
         "status": "connected",
         "updated_at": "2026-01-02T00:00:00.000Z",
@@ -413,8 +517,8 @@ def saved_view(**overrides: Any) -> dict[str, Any]:
             "search": "rank",
         },
         "created_at": "2026-01-01T00:00:00.000Z",
-        "created_by_id": "usr_1",
-        "id": "view_1",
+        "created_by_id": "usr_a00000000000000000000000",
+        "id": "viw_a00000000000000000000000",
         "name": "Product desktop",
         **overrides,
     }
@@ -423,7 +527,7 @@ def saved_view(**overrides: Any) -> dict[str, Any]:
 def competitor(**overrides: Any) -> dict[str, Any]:
     return {
         "domain": "rankzly.io",
-        "id": "comp_1",
+        "id": "cmp_a00000000000000000000000",
         "initials": "RI",
         "label": "Rankzly",
         **overrides,
@@ -435,7 +539,12 @@ def competitor_market() -> dict[str, Any]:
         "checked_keyword_count": 1,
         "columns": [
             {"domain": "example.com", "kind": "You", "label": "example.com"},
-            {"domain": "rankzly.io", "id": "comp_1", "kind": "Managed", "label": "Rankzly"},
+            {
+                "domain": "rankzly.io",
+                "id": "cmp_a00000000000000000000000",
+                "kind": "Managed",
+                "label": "Rankzly",
+            },
         ],
         "competitor_count": 1,
         "country": "United States",
@@ -480,7 +589,7 @@ def notification_preferences(**overrides: Any) -> dict[str, Any]:
         "import_in_app": True,
         "invite_email": True,
         "invite_in_app": True,
-        "project_id": "prj_1",
+        "project_id": "prj_a00000000000000000000000",
         "slack_available": False,
         "webhook_available": False,
         **overrides,
@@ -506,7 +615,7 @@ def migration_token(**overrides: Any) -> dict[str, Any]:
         "created_at": "2026-01-01T00:00:00.000Z",
         "created_by": {"email": "owner@example.com", "name": "Owner Example"},
         "expires_at": "2026-01-01T01:00:00.000Z",
-        "id": "tok_1",
+        "id": "ferry_a00000000000000000000000",
         "scope": "full",
         "single_use": True,
         **overrides,
@@ -517,11 +626,11 @@ def signal(**overrides: Any) -> dict[str, Any]:
     return {
         "created_at": "2026-07-04T19:31:00.000Z",
         "happened_at": "2026-07-04T19:30:00.000Z",
-        "id": "sig_1",
-        "keyword_id": "kw_1",
+        "id": "sig_a00000000000000000000000",
+        "keyword_id": "kw_a00000000000000000000000",
         "payload": {"version": "1.2.3"},
-        "project_id": "prj_1",
-        "public_id": "sig_1",
+        "project_id": "prj_a00000000000000000000000",
+        "public_id": "sig_a00000000000000000000000",
         "severity": "warning",
         "source": "deploy",
         "type": "deploy.completed",
@@ -821,7 +930,6 @@ def test_searches_canonical_locations() -> None:
                             "country_code": "US",
                             "display_name": "Austin, Texas, United States",
                             "hl": "en",
-                            "id": "loc_1",
                             "kind": "city",
                             "language_label": "English",
                             "location_key": "US/Texas/Austin",
@@ -842,6 +950,288 @@ def test_searches_canonical_locations() -> None:
     assert str(queue.requests[-1].url) == (
         "https://api.test/api/v1/locations/search?country=US&limit=10&q=Austin"
     )
+
+
+def test_public_id_v3_registry_and_shape_are_fixed() -> None:
+    assert PUBLIC_ID_PREFIXES == {
+        "al",
+        "alr",
+        "audit",
+        "check",
+        "cmp",
+        "conn",
+        "dwh",
+        "ferry",
+        "imp",
+        "inv",
+        "key",
+        "kw",
+        "mbr",
+        "ntf",
+        "pat",
+        "prj",
+        "sid",
+        "sig",
+        "svkw",
+        "tag",
+        "usr",
+        "viw",
+        "we",
+    }
+    assert re.fullmatch(public_id_pattern("prj"), "prj_a00000000000000000000000")
+    assert not re.fullmatch(public_id_pattern("prj"), "prj_A00000000000000000000000")
+
+
+@pytest.mark.parametrize(
+    "project_id",
+    [
+        "project_raw_cuid",
+        "kw_a00000000000000000000000",
+        "prj_A00000000000000000000000",
+        "prj_a0000000000000000000000",
+    ],
+)
+def test_rejects_malformed_public_path_ids_before_http(project_id: str) -> None:
+    queue = QueueTransport([])
+    client = make_client(queue)
+
+    with pytest.raises(ValueError, match="strict public prj_"):
+        client.get_project(project_id)
+
+    assert queue.requests == []
+
+
+def test_rejects_malformed_project_header_before_http() -> None:
+    queue = QueueTransport([])
+    client = make_client(queue, project_id="prj_a00000000000000000000000")
+
+    with pytest.raises(ValueError, match="strict public prj_"):
+        client.get_keyword(
+            "kw_a00000000000000000000000",
+            RequestOptions(headers={"X-Bisibility-Project": "raw-project-id"}),
+        )
+
+    assert queue.requests == []
+
+
+@pytest.mark.parametrize("api_key", ["bsk_live_legacy", "bsp_live_legacy", "opaque-secret"])
+def test_rejects_legacy_or_unrecognized_auth_prefixes(api_key: str) -> None:
+    with pytest.raises(BisibilityConfigurationError, match="current bsb_key_live_"):
+        BisibilityClient(api_key=api_key, base_url="https://api.test/api/v1/")
+
+
+def test_rejects_v2_cursor_before_http_and_in_success_responses() -> None:
+    v2_cursor = "eyJ2IjoyLCJvIjoxfQ"
+    queue = QueueTransport([])
+    client = make_client(queue)
+
+    with pytest.raises(ValidationError, match="opaque v3 cursor"):
+        client.list_api_keys({"cursor": v2_cursor})
+
+    assert queue.requests == []
+
+    response_queue = QueueTransport([json_response(list_response([api_key_resource()], v2_cursor))])
+    response_client = make_client(response_queue)
+    with pytest.raises(BisibilityResponseError, match="violates the SDK contract"):
+        response_client.list_api_keys()
+
+
+def test_accepts_v3_keyset_cursor_from_success_responses() -> None:
+    keyset_cursor = (
+        "eyJwdWJsaWNfaWQiOiJrd19hMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAiLCJ0"
+        "IjoiMjAyNi0wNy0yOVQxMjowMDowMC4wMDBaIiwidiI6M30"
+    )
+    queue = QueueTransport([json_response(list_response([api_key_resource()], keyset_cursor))])
+    client = make_client(queue)
+
+    assert client.list_api_keys().meta.next_cursor == keyset_cursor
+
+
+@pytest.mark.parametrize(
+    "cursor",
+    [
+        "eyJwdWJsaWNfaWQiOiJrd19hMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAiLCJ0IjoiMjAyNi0wNy0yOSIsInYiOjN9",
+        "eyJ2IjozLCJvIjotMX0",
+        "eyJ2IjozLCJvIjoxLCJpZCI6InJhdyJ9",
+    ],
+)
+def test_rejects_malformed_v3_cursor_shapes_before_http(cursor: str) -> None:
+    queue = QueueTransport([])
+    client = make_client(queue)
+
+    with pytest.raises(ValidationError, match="opaque v3 cursor"):
+        client.list_api_keys({"cursor": cursor})
+
+    assert queue.requests == []
+
+
+def test_rejects_legacy_id_bodies_and_alert_rule_legacy_fields() -> None:
+    with pytest.raises(ValidationError):
+        KeywordBulkInput(keyword_ids=["raw_keyword_id"], operation="delete")
+
+    with pytest.raises(ValidationError):
+        KeywordResearchOptions(connection_id="conn_1")
+
+    with pytest.raises(ValidationError):
+        AlertRuleInput.model_validate(
+            {
+                "condition_type": "threshold",
+                "name": "Rank drop",
+                "project_id": "prj_a00000000000000000000000",
+                "targets": [],
+            }
+        )
+
+    with pytest.raises(ValidationError, match="target_ids"):
+        AlertRuleInput(
+            condition_type="threshold",
+            name="Rank drop",
+            target_ids=["tag_a00000000000000000000000"],
+            target_type="keyword",
+        )
+
+
+def test_alert_rule_wire_uses_snake_case_typed_recipient_and_target_ids() -> None:
+    rule = AlertRuleInput(
+        condition_type="threshold",
+        name="Rank drop",
+        recipient_ids=["usr_a00000000000000000000000"],
+        target_ids=["kw_a00000000000000000000000"],
+        target_type="keyword",
+    )
+
+    assert rule.model_dump() == {
+        "channels": None,
+        "change_pct": None,
+        "competitor_domain": None,
+        "condition_type": "threshold",
+        "enabled": None,
+        "name": "Rank drop",
+        "recipient_ids": ["usr_a00000000000000000000000"],
+        "serp_feature": None,
+        "target_ids": ["kw_a00000000000000000000000"],
+        "target_type": "keyword",
+        "threshold_position": None,
+        "top_n": None,
+    }
+
+
+def test_wraps_invalid_public_id_responses_as_sdk_response_errors() -> None:
+    queue = QueueTransport([json_response(list_response([project(id="raw_database_id")]))])
+    client = make_client(queue)
+
+    with pytest.raises(BisibilityResponseError, match="violates the SDK contract") as exc_info:
+        client.list_projects()
+
+    assert isinstance(exc_info.value.cause, ValidationError)
+
+
+def test_location_and_traffic_snapshots_expose_no_resource_ids() -> None:
+    assert "id" not in LocationSuggestion.model_fields
+    assert "id" not in PageTrafficSnapshot.model_fields
+    assert "project_id" not in PageTrafficSnapshot.model_fields
+    assert LocationSuggestion.model_config["extra"] == "forbid"
+    assert PageTrafficSnapshot.model_config["extra"] == "forbid"
+
+
+def test_cloud_import_models_accept_only_the_complete_v5_contract() -> None:
+    package = CloudImportPackage.model_validate(cloud_import_package(scope="history"))
+
+    assert package.version == 5
+    assert package.project_id == "prj_a00000000000000000000000"
+    assert package.keywords[0].rankingHistory[0].checkedAt == "2026-07-27T12:00:00Z"
+    assert package.alert_rules[0].targets[0].type == "keyword"
+    assert package.model_dump(by_alias=True, exclude_none=True) == cloud_import_package(
+        scope="history"
+    )
+
+    session = CloudImportSessionCreate(
+        version=5,
+        chunk_count=1,
+        source_project_id="prj_a00000000000000000000000",
+        totals={"keywords": 1, "rank_checks": 1},
+    )
+    assert session.model_dump(exclude_none=True) == {
+        "version": 5,
+        "chunk_count": 1,
+        "source_project_id": "prj_a00000000000000000000000",
+        "totals": {"keywords": 1, "rank_checks": 1},
+    }
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        lambda package: package.pop("project_id"),
+        lambda package: package.pop("keywords"),
+        lambda package: package.pop("alert_rules"),
+        lambda package: package.pop("competitors"),
+        lambda package: package.pop("notification_preferences"),
+        lambda package: package.pop("saved_views"),
+        lambda package: package.update({"version": 4}),
+        lambda package: package.update({"version": 5.0}),
+        lambda package: package.update({"version": True}),
+        lambda package: package.update({"project_id": "507f1f77bcf86cd799439011"}),
+        lambda package: package.update({"project_id": "prj_A00000000000000000000000"}),
+        lambda package: package.update({"project_id": "sid_a00000000000000000000000"}),
+        lambda package: package.update({"projectId": "prj_a00000000000000000000000"}),
+        lambda package: package.update({"rank_checks": []}),
+        lambda package: package["keywords"][0].update({"ranking_history": []}),
+        lambda package: package["keywords"][0].update(
+            {"keyword_id": "kw_a00000000000000000000000"}
+        ),
+        lambda package: package["alert_rules"][0].update({"unknown": True}),
+        lambda package: package["alert_rules"][0]["targets"].__setitem__(0, {"type": "keyword"}),
+        lambda package: package["alert_rules"][0]["targets"].__setitem__(0, {"type": "all"}),
+    ],
+)
+def test_cloud_import_package_rejects_missing_legacy_alias_and_unknown_fields(
+    mutation: Callable[[dict[str, Any]], Any],
+) -> None:
+    package = cloud_import_package()
+    mutation(package)
+
+    with pytest.raises(ValidationError):
+        CloudImportPackage.model_validate(package)
+
+
+@pytest.mark.parametrize(
+    "session",
+    [
+        {"version": 4, "chunk_count": 1, "source_project_id": "prj_a00000000000000000000000"},
+        {"version": 5, "chunk_count": 1},
+        {"version": 5, "chunk_count": 1, "sourceProjectId": "prj_a00000000000000000000000"},
+        {"version": 5, "chunk_count": 1, "source_project_id": "sid_a00000000000000000000000"},
+        {
+            "version": 5,
+            "chunk_count": 1,
+            "source_project_id": "prj_a00000000000000000000000",
+            "rank_checks": 1,
+        },
+    ],
+)
+def test_cloud_import_session_rejects_legacy_or_unknown_fields(session: dict[str, Any]) -> None:
+    with pytest.raises(ValidationError):
+        CloudImportSessionCreate.model_validate(session)
+
+
+def test_cloud_import_responses_reject_non_job_session_and_result_ids() -> None:
+    with pytest.raises(ValidationError):
+        CloudImportSessionCreateResponse.model_validate(
+            {
+                "chunk_limits": {
+                    "max_body_bytes": 1,
+                    "max_history_rows": 1,
+                    "max_keywords": 1,
+                },
+                "session_id": "sid_a00000000000000000000000",
+                "state": "receiving",
+            }
+        )
+    with pytest.raises(ValidationError):
+        CloudImportFinalizeResponse.model_validate(
+            {"counts": {"keywords": 1}, "job_id": "sid_a00000000000000000000000", "state": "done"}
+        )
 
 
 def test_mirrored_openapi_enums_accept_current_values_and_reject_provider_drift() -> None:
@@ -912,14 +1302,14 @@ def test_sends_bearer_auth_and_default_headers_on_protected_requests() -> None:
     result = client.list_projects(RequestOptions(headers={"X-Request": "request"}))
 
     request = queue.requests[-1]
-    assert result.data[0].id == "prj_1"
+    assert result.data[0].id == "prj_a00000000000000000000000"
     assert request.method == "GET"
     assert str(request.url) == "https://api.test/api/v1/projects"
     assert request.headers["Authorization"] == f"Bearer {API_KEY}"
     assert request.headers["X-Client"] == "sdk-test"
     assert request.headers["X-Request"] == "request"
-    assert request.headers["User-Agent"] == "bisibility-sdk-python/0.3.1"
-    assert request.headers["X-Bisibility-Client"] == "bisibility-sdk-python/0.3.1"
+    assert request.headers["User-Agent"] == "bisibility-sdk-python/0.4.0"
+    assert request.headers["X-Bisibility-Client"] == "bisibility-sdk-python/0.4.0"
     assert request.extensions["timeout"] == {
         "connect": 30.0,
         "read": 30.0,
@@ -936,7 +1326,7 @@ def test_preserves_user_agent_and_allows_disabling_timeout() -> None:
 
     request = queue.requests[-1]
     assert request.headers["User-Agent"] == "my-app/1.0"
-    assert request.headers["X-Bisibility-Client"] == "bisibility-sdk-python/0.3.1"
+    assert request.headers["X-Bisibility-Client"] == "bisibility-sdk-python/0.4.0"
     assert request.extensions["timeout"] == {
         "connect": None,
         "read": None,
@@ -951,100 +1341,133 @@ def test_preserves_user_agent_and_allows_disabling_timeout() -> None:
         (
             "iter_api_keys",
             (),
-            lambda page: api_key_resource(id=f"key_{page}"),
+            lambda page: api_key_resource(
+                id="key_a00000000000000000000000" if page == 1 else "key_b00000000000000000000000"
+            ),
             {"limit": 1},
-            ["key_1", "key_2"],
+            ["key_a00000000000000000000000", "key_b00000000000000000000000"],
         ),
         (
             "iter_project_api_keys",
-            ("prj_1",),
-            lambda page: api_key_resource(id=f"key_{page}"),
+            ("prj_a00000000000000000000000",),
+            lambda page: api_key_resource(
+                id="key_a00000000000000000000000" if page == 1 else "key_b00000000000000000000000"
+            ),
             {"limit": 1},
-            ["key_1", "key_2"],
+            ["key_a00000000000000000000000", "key_b00000000000000000000000"],
         ),
         (
             "iter_webhooks",
-            ("prj_1",),
-            lambda page: webhook_resource(id=f"wh_{page}"),
+            ("prj_a00000000000000000000000",),
+            lambda page: webhook_resource(
+                id="we_a00000000000000000000000" if page == 1 else "we_b00000000000000000000000"
+            ),
             {"limit": 1},
-            ["wh_1", "wh_2"],
+            ["we_a00000000000000000000000", "we_b00000000000000000000000"],
         ),
         (
             "iter_keywords",
-            ("prj_1",),
-            lambda page: keyword(id=f"kw_{page}"),
+            ("prj_a00000000000000000000000",),
+            lambda page: keyword(
+                id="kw_a00000000000000000000000" if page == 1 else "kw_b00000000000000000000000"
+            ),
             {"limit": 1, "search": "rank tracker"},
-            ["kw_1", "kw_2"],
+            ["kw_a00000000000000000000000", "kw_b00000000000000000000000"],
         ),
         (
             "iter_rank_checks",
-            ("kw_1",),
-            lambda page: rank_check(id=f"check_{page}"),
+            ("kw_a00000000000000000000000",),
+            lambda page: rank_check(
+                id="check_a00000000000000000000000"
+                if page == 1
+                else "check_b00000000000000000000000"
+            ),
             {"limit": 1},
-            ["check_1", "check_2"],
+            ["check_a00000000000000000000000", "check_b00000000000000000000000"],
         ),
         (
             "iter_project_signals",
-            ("prj_1",),
-            lambda page: signal(id=f"sig_{page}", public_id=f"sig_{page}"),
+            ("prj_a00000000000000000000000",),
+            lambda page: signal(
+                id="sig_a00000000000000000000000" if page == 1 else "sig_b00000000000000000000000",
+                public_id="sig_a00000000000000000000000"
+                if page == 1
+                else "sig_b00000000000000000000000",
+            ),
             {"limit": 1, "source": "deploy"},
-            ["sig_1", "sig_2"],
+            ["sig_a00000000000000000000000", "sig_b00000000000000000000000"],
         ),
         (
             "iter_alert_rules",
-            ("prj_1",),
-            lambda page: alert_rule(id=f"rule_{page}"),
+            ("prj_a00000000000000000000000",),
+            lambda page: alert_rule(
+                id="alr_a00000000000000000000000" if page == 1 else "alr_b00000000000000000000000"
+            ),
             {"limit": 1},
-            ["rule_1", "rule_2"],
+            ["alr_a00000000000000000000000", "alr_b00000000000000000000000"],
         ),
         (
             "iter_triggered_alerts",
-            ("prj_1",),
-            lambda page: triggered_alert(id=f"ta_{page}"),
+            ("prj_a00000000000000000000000",),
+            lambda page: triggered_alert(
+                id="al_a00000000000000000000000" if page == 1 else "al_b00000000000000000000000"
+            ),
             {"limit": 1},
-            ["ta_1", "ta_2"],
+            ["al_a00000000000000000000000", "al_b00000000000000000000000"],
         ),
         (
             "iter_team_members",
-            ("prj_1",),
-            lambda page: team_member(id=f"mem_{page}"),
+            ("prj_a00000000000000000000000",),
+            lambda page: team_member(
+                id="mbr_a00000000000000000000000" if page == 1 else "mbr_b00000000000000000000000"
+            ),
             {"limit": 1},
-            ["mem_1", "mem_2"],
+            ["mbr_a00000000000000000000000", "mbr_b00000000000000000000000"],
         ),
         (
             "iter_team_invites",
-            ("prj_1",),
-            lambda page: team_invite(id=f"inv_{page}"),
+            ("prj_a00000000000000000000000",),
+            lambda page: team_invite(
+                id="inv_a00000000000000000000000" if page == 1 else "inv_b00000000000000000000000"
+            ),
             {"limit": 1},
-            ["inv_1", "inv_2"],
+            ["inv_a00000000000000000000000", "inv_b00000000000000000000000"],
         ),
         (
             "iter_providers",
-            ("prj_1",),
+            ("prj_a00000000000000000000000",),
             lambda page: provider(id="serpapi" if page == 1 else "dataforseo"),
             {"limit": 1},
             ["serpapi", "dataforseo"],
         ),
         (
             "iter_saved_views",
-            ("prj_1",),
-            lambda page: saved_view(id=f"view_{page}"),
+            ("prj_a00000000000000000000000",),
+            lambda page: saved_view(
+                id="viw_a00000000000000000000000" if page == 1 else "viw_b00000000000000000000000"
+            ),
             {"limit": 1},
-            ["view_1", "view_2"],
+            ["viw_a00000000000000000000000", "viw_b00000000000000000000000"],
         ),
         (
             "iter_competitors",
-            ("prj_1",),
-            lambda page: competitor(id=f"comp_{page}"),
+            ("prj_a00000000000000000000000",),
+            lambda page: competitor(
+                id="cmp_a00000000000000000000000" if page == 1 else "cmp_b00000000000000000000000"
+            ),
             {"limit": 1},
-            ["comp_1", "comp_2"],
+            ["cmp_a00000000000000000000000", "cmp_b00000000000000000000000"],
         ),
         (
             "iter_migration_tokens",
-            ("prj_1",),
-            lambda page: migration_token(id=f"tok_{page}"),
+            ("prj_a00000000000000000000000",),
+            lambda page: migration_token(
+                id="ferry_a00000000000000000000000"
+                if page == 1
+                else "ferry_b00000000000000000000000"
+            ),
             {"limit": 1},
-            ["tok_1", "tok_2"],
+            ["ferry_a00000000000000000000000", "ferry_b00000000000000000000000"],
         ),
     ],
 )
@@ -1057,7 +1480,7 @@ def test_cursor_iterators_fetch_all_pages_and_preserve_options(
 ) -> None:
     queue = QueueTransport(
         [
-            json_response(list_response([resource_factory(1)], "next_1")),
+            json_response(list_response([resource_factory(1)], "eyJ2IjozLCJvIjo5fQ")),
             json_response(list_response([resource_factory(2)])),
         ]
     )
@@ -1069,7 +1492,7 @@ def test_cursor_iterators_fetch_all_pages_and_preserve_options(
     assert queue.requests[0].url.params.get("limit") == "1"
     assert queue.requests[0].url.params.get("cursor") is None
     assert queue.requests[1].url.params.get("limit") == "1"
-    assert queue.requests[1].url.params.get("cursor") == "next_1"
+    assert queue.requests[1].url.params.get("cursor") == "eyJ2IjozLCJvIjo5fQ"
     if "search" in options:
         assert all(request.url.params.get("search") == "rank tracker" for request in queue.requests)
     if "source" in options:
@@ -1101,40 +1524,53 @@ def test_lists_and_gets_projects() -> None:
     queue = QueueTransport(
         [
             json_response(list_response([project()])),
-            json_response(project(id="prj spaced")),
+            json_response(project()),
         ]
     )
     client = make_client(queue)
 
     assert client.list_projects().data[0].domain == "example.com"
-    assert client.get_project("prj spaced").id == "prj spaced"
+    assert client.get_project("prj_a00000000000000000000000").id == "prj_a00000000000000000000000"
 
     assert str(queue.requests[0].url) == "https://api.test/api/v1/projects"
-    assert str(queue.requests[1].url) == "https://api.test/api/v1/projects/prj%20spaced"
+    assert (
+        str(queue.requests[1].url)
+        == "https://api.test/api/v1/projects/prj_a00000000000000000000000"
+    )
 
 
 def test_personal_project_header_and_request_override() -> None:
     queue = QueueTransport([json_response(keyword()), json_response(keyword())])
-    client = make_client(queue, project_id="prj_default")
+    client = make_client(queue, project_id="prj_c00000000000000000000000")
 
-    client.get_keyword("kw_1")
-    client.get_keyword("kw_1", RequestOptions(headers={"X-Bisibility-Project": "prj_override"}))
+    client.get_keyword("kw_a00000000000000000000000")
+    client.get_keyword(
+        "kw_a00000000000000000000000",
+        RequestOptions(headers={"X-Bisibility-Project": "prj_d00000000000000000000000"}),
+    )
 
-    assert queue.requests[0].headers["X-Bisibility-Project"] == "prj_default"
-    assert queue.requests[1].headers["X-Bisibility-Project"] == "prj_override"
+    assert queue.requests[0].headers["X-Bisibility-Project"] == "prj_c00000000000000000000000"
+    assert queue.requests[1].headers["X-Bisibility-Project"] == "prj_d00000000000000000000000"
 
 
 def test_profile_personal_tokens_and_project_creation() -> None:
     me = {
         "email": "owner@example.com",
-        "id": "user_1",
+        "id": "usr_a00000000000000000000000",
         "name": "Owner",
-        "projects": [{"domain": "example.com", "id": "prj_1", "name": "Example", "role": "owner"}],
+        "projects": [
+            {
+                "domain": "example.com",
+                "id": "prj_a00000000000000000000000",
+                "name": "Example",
+                "role": "owner",
+            }
+        ],
     }
     issued = {
         **personal_token_resource(),
-        "masked_value": "bsp_live_example******abcd",
-        "token": "bsp_live_raw",
+        "masked_value": "bsb_pat_live_example******abcd",
+        "token": "bsb_pat_live_raw",
     }
     queue = QueueTransport(
         [
@@ -1150,20 +1586,23 @@ def test_profile_personal_tokens_and_project_creation() -> None:
 
     assert client.get_me().email == "owner@example.com"
     assert client.update_me({"name": "Renamed"}).name == "Renamed"
-    assert client.list_my_tokens().data[0].id == "pat_1"
+    assert client.list_my_tokens().data[0].id == "pat_a00000000000000000000000"
     assert (
         client.create_my_token({"name": "CLI", "scope": "admin", "expires_in_days": 90}).token
-        == "bsp_live_raw"
+        == "bsb_pat_live_raw"
     )
-    assert client.revoke_my_token("current").revoked_at is not None
-    assert client.create_project({"domain": "example.com", "name": "Example"}).id == "prj_1"
+    assert client.revoke_my_token("pat_a00000000000000000000000").revoked_at is not None
+    assert (
+        client.create_project({"domain": "example.com", "name": "Example"}).id
+        == "prj_a00000000000000000000000"
+    )
 
     assert [str(request.url) for request in queue.requests] == [
         "https://api.test/api/v1/me",
         "https://api.test/api/v1/me",
         "https://api.test/api/v1/me/tokens",
         "https://api.test/api/v1/me/tokens",
-        "https://api.test/api/v1/me/tokens/current",
+        "https://api.test/api/v1/me/tokens/pat_a00000000000000000000000",
         "https://api.test/api/v1/projects",
     ]
     assert request_json(queue.requests[3]) == {
@@ -1175,8 +1614,8 @@ def test_profile_personal_tokens_and_project_creation() -> None:
 
 def test_project_api_keys_and_webhook_crud() -> None:
     issued_key = {
-        **api_key_resource(id="key_ci", name="CI"),
-        "masked_value": "bsk_live_12345678******cdef",
+        **api_key_resource(id="key_d00000000000000000000000", name="CI"),
+        "masked_value": "bsb_key_live_12345678******cdef",
         "token": API_KEY,
     }
     queue = QueueTransport(
@@ -1191,26 +1630,43 @@ def test_project_api_keys_and_webhook_crud() -> None:
     )
     client = make_client(queue)
 
-    assert client.list_project_api_keys("prj_1").data[0].id == "key_1"
-    assert client.create_project_api_key("prj_1", {"name": "CI"}).id == "key_ci"
-    assert client.list_webhooks("prj_1").data[0].id == "wh_1"
+    assert (
+        client.list_project_api_keys("prj_a00000000000000000000000").data[0].id
+        == "key_a00000000000000000000000"
+    )
+    assert (
+        client.create_project_api_key("prj_a00000000000000000000000", {"name": "CI"}).id
+        == "key_d00000000000000000000000"
+    )
+    assert (
+        client.list_webhooks("prj_a00000000000000000000000").data[0].id
+        == "we_a00000000000000000000000"
+    )
     assert (
         client.create_webhook(
-            "prj_1",
+            "prj_a00000000000000000000000",
             {"hmac_secret": "1234567890123456", "url": "https://example.com/hook"},
         ).id
-        == "wh_1"
+        == "we_a00000000000000000000000"
     )
-    assert client.update_webhook("prj_1", "wh_1", {"enabled": False}).enabled is False
-    assert client.delete_webhook("prj_1", "wh_1").enabled is False
+    assert (
+        client.update_webhook(
+            "prj_a00000000000000000000000", "we_a00000000000000000000000", {"enabled": False}
+        ).enabled
+        is False
+    )
+    assert (
+        client.delete_webhook("prj_a00000000000000000000000", "we_a00000000000000000000000").enabled
+        is False
+    )
 
     assert [str(request.url) for request in queue.requests] == [
-        "https://api.test/api/v1/projects/prj_1/api-keys",
-        "https://api.test/api/v1/projects/prj_1/api-keys",
-        "https://api.test/api/v1/projects/prj_1/webhooks",
-        "https://api.test/api/v1/projects/prj_1/webhooks",
-        "https://api.test/api/v1/projects/prj_1/webhooks/wh_1",
-        "https://api.test/api/v1/projects/prj_1/webhooks/wh_1",
+        "https://api.test/api/v1/projects/prj_a00000000000000000000000/api-keys",
+        "https://api.test/api/v1/projects/prj_a00000000000000000000000/api-keys",
+        "https://api.test/api/v1/projects/prj_a00000000000000000000000/webhooks",
+        "https://api.test/api/v1/projects/prj_a00000000000000000000000/webhooks",
+        "https://api.test/api/v1/projects/prj_a00000000000000000000000/webhooks/we_a00000000000000000000000",
+        "https://api.test/api/v1/projects/prj_a00000000000000000000000/webhooks/we_a00000000000000000000000",
     ]
 
 
@@ -1236,7 +1692,12 @@ def test_webhook_update_omits_unset_hmac_secret_from_request_body() -> None:
     client = make_client(queue)
 
     update = WebhookUpdateInput(enabled=False)
-    assert client.update_webhook("prj_1", "wh_1", update).enabled is False
+    assert (
+        client.update_webhook(
+            "prj_a00000000000000000000000", "we_a00000000000000000000000", update
+        ).enabled
+        is False
+    )
 
     assert request_json(queue.requests[0]) == {"enabled": False}
 
@@ -1250,8 +1711,8 @@ def test_project_exposes_write_mode() -> None:
     )
     client = make_client(queue)
 
-    assert client.get_project("prj_1").write_mode == "active"
-    assert client.get_project("prj_1").write_mode == "migration_hold"
+    assert client.get_project("prj_a00000000000000000000000").write_mode == "active"
+    assert client.get_project("prj_a00000000000000000000000").write_mode == "migration_hold"
 
 
 def test_updates_and_deletes_project() -> None:
@@ -1264,19 +1725,34 @@ def test_updates_and_deletes_project() -> None:
     )
     client = make_client(queue)
 
-    assert client.update_project("prj_1", UpdateProjectInput(name="Renamed")).name == "Renamed"
     assert (
-        client.update_project("prj_1", {"domain": "renamed.example.com"}).domain
+        client.update_project(
+            "prj_a00000000000000000000000", UpdateProjectInput(name="Renamed")
+        ).name
+        == "Renamed"
+    )
+    assert (
+        client.update_project(
+            "prj_a00000000000000000000000", {"domain": "renamed.example.com"}
+        ).domain
         == "renamed.example.com"
     )
-    assert client.delete_project("prj_1").id == "prj_1"
+    assert (
+        client.delete_project("prj_a00000000000000000000000").id == "prj_a00000000000000000000000"
+    )
 
-    assert str(queue.requests[0].url) == "https://api.test/api/v1/projects/prj_1"
+    assert (
+        str(queue.requests[0].url)
+        == "https://api.test/api/v1/projects/prj_a00000000000000000000000"
+    )
     assert queue.requests[0].method == "PATCH"
     assert request_json(queue.requests[0]) == {"name": "Renamed"}
     assert request_json(queue.requests[1]) == {"domain": "renamed.example.com"}
     assert queue.requests[2].method == "DELETE"
-    assert str(queue.requests[2].url) == "https://api.test/api/v1/projects/prj_1"
+    assert (
+        str(queue.requests[2].url)
+        == "https://api.test/api/v1/projects/prj_a00000000000000000000000"
+    )
 
 
 def test_updates_project_defaults() -> None:
@@ -1289,16 +1765,21 @@ def test_updates_project_defaults() -> None:
     client = make_client(queue)
 
     updated = client.update_project_defaults(
-        "prj_1",
+        "prj_a00000000000000000000000",
         ProjectDefaultsPatch(frequency="weekly", jitter_minutes=30, timezone="UTC"),
     )
     assert updated.frequency == "weekly"
-    assert updated.project_id == "prj_1"
-    moved = client.update_project_defaults("prj_1", {"location_key": "US/Texas/Austin"})
+    assert updated.project_id == "prj_a00000000000000000000000"
+    moved = client.update_project_defaults(
+        "prj_a00000000000000000000000", {"location_key": "US/Texas/Austin"}
+    )
     assert moved.city == "Austin"
     assert moved.location_key == "US/Texas/Austin"
 
-    assert str(queue.requests[0].url) == "https://api.test/api/v1/projects/prj_1/defaults"
+    assert (
+        str(queue.requests[0].url)
+        == "https://api.test/api/v1/projects/prj_a00000000000000000000000/defaults"
+    )
     assert queue.requests[0].method == "PATCH"
     assert request_json(queue.requests[0]) == {
         "frequency": "weekly",
@@ -1320,14 +1801,14 @@ def test_gets_project_defaults() -> None:
     queue = QueueTransport([json_response(response)])
     client = make_client(queue)
 
-    defaults = client.get_project_defaults("prj spaced/1")
+    defaults = client.get_project_defaults("prj_a00000000000000000000000")
 
     assert defaults.model_dump() == response
     assert defaults.source == "explicit"
     assert queue.requests[0].method == "GET"
     assert (
         str(queue.requests[0].url)
-        == "https://api.test/api/v1/projects/prj%20spaced%2F1/defaults"
+        == "https://api.test/api/v1/projects/prj_a00000000000000000000000/defaults"
     )
 
 
@@ -1344,13 +1825,14 @@ def test_get_project_defaults_maps_forbidden() -> None:
     client = make_client(queue)
 
     with pytest.raises(BisibilityApiError) as exc_info:
-        client.get_project_defaults("prj_1")
+        client.get_project_defaults("prj_a00000000000000000000000")
 
     assert exc_info.value.status == 403
     assert exc_info.value.problem is not None
     assert exc_info.value.problem.title == "Forbidden"
     assert (
-        exc_info.value.url == "https://api.test/api/v1/projects/prj_1/defaults"
+        exc_info.value.url
+        == "https://api.test/api/v1/projects/prj_a00000000000000000000000/defaults"
     )
 
 
@@ -1371,7 +1853,7 @@ def test_gets_project_overview_with_filters_and_preserves_null_metrics() -> None
     client = make_client(queue)
 
     overview = client.get_project_overview(
-        "prj spaced/1",
+        "prj_a00000000000000000000000",
         ProjectOverviewOptions(range="90d", device="mobile", tag="Priority tag"),
     )
 
@@ -1382,7 +1864,7 @@ def test_gets_project_overview_with_filters_and_preserves_null_metrics() -> None
     assert queue.requests[0].method == "GET"
     assert (
         str(queue.requests[0].url)
-        == "https://api.test/api/v1/projects/prj%20spaced%2F1/overview?range=90d&device=mobile&tag=Priority+tag"
+        == "https://api.test/api/v1/projects/prj_a00000000000000000000000/overview?range=90d&device=mobile&tag=Priority+tag"
     )
 
 
@@ -1420,7 +1902,7 @@ def test_get_project_overview_maps_forbidden() -> None:
     client = make_client(queue)
 
     with pytest.raises(BisibilityApiError) as exc_info:
-        client.get_project_overview("prj_1")
+        client.get_project_overview("prj_a00000000000000000000000")
 
     assert exc_info.value.status == 403
     assert exc_info.value.problem is not None
@@ -1433,7 +1915,7 @@ def test_matches_project_keywords_and_preserves_request_and_stored_texts() -> No
     client = make_client(queue)
 
     matches = client.match_project_keywords(
-        "prj spaced/1",
+        "prj_a00000000000000000000000",
         KeywordMatchRequest(texts=[" Headless CMS ", "Python SDK"]),
     )
 
@@ -1448,7 +1930,7 @@ def test_matches_project_keywords_and_preserves_request_and_stored_texts() -> No
     assert queue.requests[0].method == "POST"
     assert (
         str(queue.requests[0].url)
-        == "https://api.test/api/v1/projects/prj%20spaced%2F1/keyword-matches"
+        == "https://api.test/api/v1/projects/prj_a00000000000000000000000/keyword-matches"
     )
     assert request_json(queue.requests[0]) == {"texts": [" Headless CMS ", "Python SDK"]}
 
@@ -1459,7 +1941,9 @@ def test_keyword_match_preserves_null_ranking_url() -> None:
     queue = QueueTransport([json_response(response)])
     client = make_client(queue)
 
-    matches = client.match_project_keywords("prj_1", {"texts": ["headless cms"]})
+    matches = client.match_project_keywords(
+        "prj_a00000000000000000000000", {"texts": ["headless cms"]}
+    )
 
     assert matches.data[0].ranking_url is None
     assert matches.data[0].model_dump()["ranking_url"] is None
@@ -1513,7 +1997,7 @@ def test_match_project_keywords_maps_forbidden() -> None:
     client = make_client(queue)
 
     with pytest.raises(BisibilityApiError) as exc_info:
-        client.match_project_keywords("prj_1", {"texts": ["headless cms"]})
+        client.match_project_keywords("prj_a00000000000000000000000", {"texts": ["headless cms"]})
 
     assert exc_info.value.status == 403
     assert exc_info.value.problem is not None
@@ -1522,20 +2006,23 @@ def test_match_project_keywords_maps_forbidden() -> None:
 
 def test_lists_creates_and_revokes_api_keys() -> None:
     created = {
-        **api_key_resource(id="key_new", name="CI"),
-        "masked_value": "bsk_live_12345678******cdef",
+        **api_key_resource(id="key_c00000000000000000000000", name="CI"),
+        "masked_value": "bsb_key_live_12345678******cdef",
         "token": API_KEY,
     }
     queue = QueueTransport(
         [
-            json_response(list_response([api_key_resource()], "cursor_1")),
+            json_response(list_response([api_key_resource()], "eyJ2IjozLCJvIjoxfQ")),
             json_response(created, 201),
             json_response(api_key_resource(revoked_at="2026-01-03T00:00:00.000Z")),
         ]
     )
     client = make_client(queue)
 
-    assert client.list_api_keys({"cursor": "cursor 1", "limit": 10}).meta.next_cursor == "cursor_1"
+    assert (
+        client.list_api_keys({"cursor": "eyJ2IjozLCJvIjoxfQ", "limit": 10}).meta.next_cursor
+        == "eyJ2IjozLCJvIjoxfQ"
+    )
     assert (
         client.create_api_key(
             {"name": "CI"},
@@ -1543,14 +2030,23 @@ def test_lists_creates_and_revokes_api_keys() -> None:
         ).token
         == API_KEY
     )
-    assert client.revoke_api_key("key_1").revoked_at == "2026-01-03T00:00:00.000Z"
+    assert (
+        client.revoke_api_key("key_a00000000000000000000000").revoked_at
+        == "2026-01-03T00:00:00.000Z"
+    )
 
-    assert str(queue.requests[0].url) == "https://api.test/api/v1/api-keys?cursor=cursor+1&limit=10"
+    assert (
+        str(queue.requests[0].url)
+        == "https://api.test/api/v1/api-keys?cursor=eyJ2IjozLCJvIjoxfQ&limit=10"
+    )
     assert queue.requests[1].method == "POST"
     assert queue.requests[1].headers["Idempotency-Key"] == "idem_1"
     assert request_json(queue.requests[1]) == {"name": "CI"}
     assert queue.requests[2].method == "DELETE"
-    assert str(queue.requests[2].url) == "https://api.test/api/v1/api-keys/key_1"
+    assert (
+        str(queue.requests[2].url)
+        == "https://api.test/api/v1/api-keys/key_a00000000000000000000000"
+    )
 
 
 def test_creates_api_key_with_typed_input() -> None:
@@ -1558,8 +2054,8 @@ def test_creates_api_key_with_typed_input() -> None:
         [
             json_response(
                 {
-                    **api_key_resource(id="key_new", name="CI"),
-                    "masked_value": "bsk_live_12345678******cdef",
+                    **api_key_resource(id="key_c00000000000000000000000", name="CI"),
+                    "masked_value": "bsb_key_live_12345678******cdef",
                     "token": API_KEY,
                 },
                 201,
@@ -1568,7 +2064,7 @@ def test_creates_api_key_with_typed_input() -> None:
     )
     client = make_client(queue)
 
-    assert client.create_api_key(ApiKeyCreateInput(name="CI")).id == "key_new"
+    assert client.create_api_key(ApiKeyCreateInput(name="CI")).id == "key_c00000000000000000000000"
     assert request_json(queue.requests[-1]) == {"name": "CI"}
 
 
@@ -1577,8 +2073,8 @@ def test_preserves_explicit_content_type_and_request_timeout() -> None:
         [
             json_response(
                 {
-                    **api_key_resource(id="key_new", name="CI"),
-                    "masked_value": "bsk_live_12345678******cdef",
+                    **api_key_resource(id="key_c00000000000000000000000", name="CI"),
+                    "masked_value": "bsb_key_live_12345678******cdef",
                     "token": API_KEY,
                 },
                 201,
@@ -1599,14 +2095,14 @@ def test_preserves_explicit_content_type_and_request_timeout() -> None:
 
 
 def test_lists_keywords_with_all_supported_filters() -> None:
-    queue = QueueTransport([json_response(list_response([keyword()], "next_1"))])
+    queue = QueueTransport([json_response(list_response([keyword()], "eyJ2IjozLCJvIjo5fQ"))])
     client = make_client(queue)
 
     result = client.list_keywords(
-        "prj_1",
+        "prj_a00000000000000000000000",
         ListKeywordsOptions(
             country="United States",
-            cursor="cursor_1",
+            cursor="eyJ2IjozLCJvIjoxfQ",
             device="desktop",
             intent="transactional",
             limit=25,
@@ -1621,8 +2117,8 @@ def test_lists_keywords_with_all_supported_filters() -> None:
 
     assert result.data[0].text == "rank tracker"
     assert str(queue.requests[-1].url) == (
-        "https://api.test/api/v1/projects/prj_1/keywords?"
-        "cursor=cursor_1&filter%5Bcountry%5D=United+States&filter%5Bdevice%5D=desktop&"
+        "https://api.test/api/v1/projects/prj_a00000000000000000000000/keywords?"
+        "cursor=eyJ2IjozLCJvIjoxfQ&filter%5Bcountry%5D=United+States&filter%5Bdevice%5D=desktop&"
         "filter%5Bintent%5D=transactional&"
         "filter%5Bposition_gt%5D=3&filter%5Bposition_lt%5D=10&filter%5Btag%5D=Product&"
         "filter%5Btopic%5D=Pricing&"
@@ -1637,7 +2133,11 @@ def test_lists_ranked_keyword_suggestions_with_paid_cache_metadata() -> None:
                 {
                     "cached": False,
                     "connections": [
-                        {"id": "connection_1", "label": "DataForSEO", "provider": "dataforseo"}
+                        {
+                            "id": "conn_d00000000000000000000000",
+                            "label": "DataForSEO",
+                            "provider": "dataforseo",
+                        }
                     ],
                     "cost_cents": 2,
                     "fetched_at": "2026-07-22T10:00:00.000Z",
@@ -1659,9 +2159,9 @@ def test_lists_ranked_keyword_suggestions_with_paid_cache_metadata() -> None:
     client = make_client(queue)
 
     result = client.list_ranked_keyword_suggestions(
-        "prj_1",
+        "prj_a00000000000000000000000",
         ListRankedKeywordSuggestionsOptions(
-            connection_id="connection_1",
+            connection_id="conn_d00000000000000000000000",
             fresh=True,
             limit=100,
             offset=100,
@@ -1673,8 +2173,8 @@ def test_lists_ranked_keyword_suggestions_with_paid_cache_metadata() -> None:
     assert result.rows[0].already_tracked is True
     assert result.rows[0].estimated_traffic == 61.2
     assert str(queue.requests[-1].url) == (
-        "https://api.test/api/v1/projects/prj_1/ranked-keyword-suggestions?"
-        "connection_id=connection_1&fresh=true&limit=100&offset=100"
+        "https://api.test/api/v1/projects/prj_a00000000000000000000000/ranked-keyword-suggestions?"
+        "connection_id=conn_d00000000000000000000000&fresh=true&limit=100&offset=100"
     )
 
 
@@ -1685,7 +2185,11 @@ def test_researches_keywords_with_partial_source_diagnostics_and_cost_options() 
                 {
                     "cached": False,
                     "connections": [
-                        {"id": "connection_1", "label": "DataForSEO", "provider": "dataforseo"}
+                        {
+                            "id": "conn_d00000000000000000000000",
+                            "label": "DataForSEO",
+                            "provider": "dataforseo",
+                        }
                     ],
                     "cost_cents": 1.6,
                     "fetched_at": "2026-07-22T10:00:00.000Z",
@@ -1736,9 +2240,9 @@ def test_researches_keywords_with_partial_source_diagnostics_and_cost_options() 
     client = make_client(queue)
 
     result = client.research_keywords(
-        "prj spaced",
+        "prj_a00000000000000000000000",
         KeywordResearchOptions(
-            connection_id="connection_1",
+            connection_id="conn_d00000000000000000000000",
             estimate_only=False,
             fresh=True,
             include_clickstream=True,
@@ -1761,8 +2265,8 @@ def test_researches_keywords_with_partial_source_diagnostics_and_cost_options() 
     assert result.sources[2].status == "skipped"
     assert result.sources[2].reason == "previous_source_failed"
     assert str(queue.requests[-1].url) == (
-        "https://api.test/api/v1/projects/prj%20spaced/keyword-research?"
-        "connection_id=connection_1&estimate_only=false&fresh=true&include_clickstream=true&"
+        "https://api.test/api/v1/projects/prj_a00000000000000000000000/keyword-research?"
+        "connection_id=conn_d00000000000000000000000&estimate_only=false&fresh=true&include_clickstream=true&"
         "max_cost_cents=7&mode=auto&result_limit=300&seed=rank+tracker"
     )
 
@@ -1774,7 +2278,11 @@ def test_maps_keyword_research_estimate_response() -> None:
                 {
                     "cached": False,
                     "connections": [
-                        {"id": "connection_1", "label": "DataForSEO", "provider": "dataforseo"}
+                        {
+                            "id": "conn_d00000000000000000000000",
+                            "label": "DataForSEO",
+                            "provider": "dataforseo",
+                        }
                     ],
                     "cost_cents": 0,
                     "estimate": True,
@@ -1805,7 +2313,8 @@ def test_maps_keyword_research_estimate_response() -> None:
     client = make_client(queue)
 
     result = client.research_keywords(
-        "prj_1", KeywordResearchOptions(estimate_only=True, seed="rank tracker")
+        "prj_a00000000000000000000000",
+        KeywordResearchOptions(estimate_only=True, seed="rank tracker"),
     )
 
     assert result.estimate is True
@@ -1813,7 +2322,7 @@ def test_maps_keyword_research_estimate_response() -> None:
     assert result.sources[0].cached is True
     assert result.sources[1].cost_cents == 1.01
     assert str(queue.requests[-1].url).endswith(
-        "/projects/prj_1/keyword-research?estimate_only=true&seed=rank+tracker"
+        "/projects/prj_a00000000000000000000000/keyword-research?estimate_only=true&seed=rank+tracker"
     )
 
 
@@ -1822,7 +2331,7 @@ def test_analyzes_backlinks_with_all_query_options() -> None:
     client = make_client(queue)
 
     result = client.analyze_backlinks(
-        "proj_1",
+        "prj_a00000000000000000000000",
         AnalyzeBacklinksOptions(
             target="acme-store.com",
             target_scope="site",
@@ -1844,7 +2353,7 @@ def test_analyzes_backlinks_with_all_query_options() -> None:
     assert result.data.rows[0].lost_at is None
     assert result.data.rows[0].status == "active"
     assert str(queue.requests[-1].url) == (
-        "https://api.test/api/v1/projects/proj_1/backlinks?"
+        "https://api.test/api/v1/projects/prj_a00000000000000000000000/backlinks?"
         "target=acme-store.com&target_scope=site&include_subdomains=true&result_limit=1000&"
         "mode=one_per_domain&estimate_only=false&fresh=true&max_cost_cents=9"
     )
@@ -1854,10 +2363,12 @@ def test_analyze_backlinks_omits_unspecified_query_options() -> None:
     queue = QueueTransport([json_response({"data": backlinks_snapshot()})])
     client = make_client(queue)
 
-    client.analyze_backlinks("proj_1", AnalyzeBacklinksOptions(target="acme-store.com"))
+    client.analyze_backlinks(
+        "prj_a00000000000000000000000", AnalyzeBacklinksOptions(target="acme-store.com")
+    )
 
     assert str(queue.requests[-1].url) == (
-        "https://api.test/api/v1/projects/proj_1/backlinks?target=acme-store.com"
+        "https://api.test/api/v1/projects/prj_a00000000000000000000000/backlinks?target=acme-store.com"
     )
 
 
@@ -1877,7 +2388,7 @@ def test_loads_more_backlink_rows_with_snake_case_body() -> None:
     client = make_client(queue)
 
     result = client.load_more_backlink_rows(
-        "proj_1",
+        "prj_a00000000000000000000000",
         LoadMoreBacklinkRowsOptions(
             target="acme-store.com",
             target_scope="site",
@@ -1890,7 +2401,7 @@ def test_loads_more_backlink_rows_with_snake_case_body() -> None:
     assert result.data.fetched_row_count == 200
     assert queue.requests[-1].method == "POST"
     assert str(queue.requests[-1].url) == (
-        "https://api.test/api/v1/projects/proj_1/backlinks/rows"
+        "https://api.test/api/v1/projects/prj_a00000000000000000000000/backlinks/rows"
     )
     assert request_json(queue.requests[-1]) == {
         "target": "acme-store.com",
@@ -1907,7 +2418,11 @@ def test_gets_keyword_metrics_with_body_options_and_cached_counts() -> None:
                 {
                     "cached_count": 1,
                     "connections": [
-                        {"id": "connection_1", "label": "DataForSEO", "provider": "dataforseo"}
+                        {
+                            "id": "conn_d00000000000000000000000",
+                            "label": "DataForSEO",
+                            "provider": "dataforseo",
+                        }
                     ],
                     "cost_cents": 1,
                     "fetched_at": "2026-07-22T10:00:00.000Z",
@@ -1941,9 +2456,9 @@ def test_gets_keyword_metrics_with_body_options_and_cached_counts() -> None:
     client = make_client(queue)
 
     result = client.get_keyword_metrics(
-        "prj_1",
+        "prj_a00000000000000000000000",
         KeywordMetricsInput(
-            connection_id="connection_1",
+            connection_id="conn_d00000000000000000000000",
             estimate_only=False,
             fresh=True,
             include_clickstream=True,
@@ -1959,9 +2474,12 @@ def test_gets_keyword_metrics_with_body_options_and_cached_counts() -> None:
     assert result.rows[1].intent is None
     request = queue.requests[-1]
     assert request.method == "POST"
-    assert str(request.url) == "https://api.test/api/v1/projects/prj_1/keyword-metrics"
+    assert (
+        str(request.url)
+        == "https://api.test/api/v1/projects/prj_a00000000000000000000000/keyword-metrics"
+    )
     assert request_json(request) == {
-        "connection_id": "connection_1",
+        "connection_id": "conn_d00000000000000000000000",
         "estimate_only": False,
         "fresh": True,
         "include_clickstream": True,
@@ -1977,7 +2495,11 @@ def test_maps_keyword_metrics_estimate_response() -> None:
                 {
                     "cached_count": 1,
                     "connections": [
-                        {"id": "connection_1", "label": "DataForSEO", "provider": "dataforseo"}
+                        {
+                            "id": "conn_d00000000000000000000000",
+                            "label": "DataForSEO",
+                            "provider": "dataforseo",
+                        }
                     ],
                     "cost_cents": 0,
                     "estimate": True,
@@ -1995,7 +2517,7 @@ def test_maps_keyword_metrics_estimate_response() -> None:
     client = make_client(queue)
 
     result = client.get_keyword_metrics(
-        "prj_1",
+        "prj_a00000000000000000000000",
         KeywordMetricsInput(estimate_only=True, keywords=["rank tracker", "seo api"]),
     )
 
@@ -2018,7 +2540,7 @@ def test_keyword_metrics_enforces_provider_batch_limit() -> None:
 def test_creates_keywords_through_create_keywords_and_add_keywords() -> None:
     response = {
         "created": 1,
-        "results": [{"keyword": keyword(id="kw_new"), "status": "created"}],
+        "results": [{"keyword": keyword(id="kw_c00000000000000000000000"), "status": "created"}],
         "skipped": 0,
     }
     body = CreateKeywordsBatch(
@@ -2036,15 +2558,21 @@ def test_creates_keywords_through_create_keywords_and_add_keywords() -> None:
 
     assert (
         client.create_keywords(
-            "prj_1",
+            "prj_a00000000000000000000000",
             body,
             request_options={"idempotencyKey": "idem_keywords"},
         ).created
         == 1
     )
-    assert client.add_keywords("prj_1", ["rank tracker"]).results[0].keyword.id == "kw_new"
+    assert (
+        client.add_keywords("prj_a00000000000000000000000", ["rank tracker"]).results[0].keyword.id
+        == "kw_c00000000000000000000000"
+    )
 
-    assert str(queue.requests[0].url) == "https://api.test/api/v1/projects/prj_1/keywords"
+    assert (
+        str(queue.requests[0].url)
+        == "https://api.test/api/v1/projects/prj_a00000000000000000000000/keywords"
+    )
     assert queue.requests[0].headers["Content-Type"] == "application/json"
     assert queue.requests[0].headers["Idempotency-Key"] == "idem_keywords"
     assert request_json(queue.requests[0]) == {
@@ -2065,7 +2593,9 @@ def test_create_keywords_sends_market_and_classification_fields() -> None:
         "created": 1,
         "results": [
             {
-                "keyword": keyword(id="kw_new", intent="commercial", topic="rank tracking"),
+                "keyword": keyword(
+                    id="kw_c00000000000000000000000", intent="commercial", topic="rank tracking"
+                ),
                 "status": "created",
                 "warning": "City not found; tracking at country level.",
             }
@@ -2077,7 +2607,7 @@ def test_create_keywords_sends_market_and_classification_fields() -> None:
     client = make_client(queue)
 
     result = client.create_keywords(
-        "prj_1",
+        "prj_a00000000000000000000000",
         CreateKeywordsBatch(
             keywords=[
                 CreateKeywordInput(
@@ -2111,13 +2641,13 @@ def test_create_keywords_sends_market_and_classification_fields() -> None:
 def test_create_keywords_response_omits_warnings_by_default() -> None:
     response = {
         "created": 1,
-        "results": [{"keyword": keyword(id="kw_new"), "status": "created"}],
+        "results": [{"keyword": keyword(id="kw_c00000000000000000000000"), "status": "created"}],
         "skipped": 0,
     }
     queue = QueueTransport([json_response(response, 201)])
     client = make_client(queue)
 
-    result = client.create_keywords("prj_1", ["rank tracker"])
+    result = client.create_keywords("prj_a00000000000000000000000", ["rank tracker"])
 
     assert result.warnings is None
     assert result.results[0].warning is None
@@ -2128,7 +2658,7 @@ def test_update_keyword_sends_market_and_classification_fields() -> None:
     client = make_client(queue)
 
     updated = client.update_keyword(
-        "kw_1",
+        "kw_a00000000000000000000000",
         UpdateKeywordInput(
             city="Austin",
             intent="informational",
@@ -2158,13 +2688,17 @@ def test_gets_updates_sets_target_url_and_deletes_keyword() -> None:
     )
     client = make_client(queue)
 
-    assert client.get_keyword("kw_1").id == "kw_1"
-    updated = client.update_keyword("kw_1", UpdateKeywordInput(keyword="new text", tags=["API"]))
+    assert client.get_keyword("kw_a00000000000000000000000").id == "kw_a00000000000000000000000"
+    updated = client.update_keyword(
+        "kw_a00000000000000000000000", UpdateKeywordInput(keyword="new text", tags=["API"])
+    )
     assert updated.text == "new text"
-    assert client.set_keyword_target_url("kw_1", None).target_url is None
-    assert client.delete_keyword("kw_1").id == "kw_1"
+    assert client.set_keyword_target_url("kw_a00000000000000000000000", None).target_url is None
+    assert client.delete_keyword("kw_a00000000000000000000000").id == "kw_a00000000000000000000000"
 
-    assert str(queue.requests[0].url) == "https://api.test/api/v1/keywords/kw_1"
+    assert (
+        str(queue.requests[0].url) == "https://api.test/api/v1/keywords/kw_a00000000000000000000000"
+    )
     assert queue.requests[1].method == "PATCH"
     assert request_json(queue.requests[1]) == {"keyword": "new text", "tags": ["API"]}
     assert request_json(queue.requests[2]) == {"target_url": None}
@@ -2177,7 +2711,7 @@ def test_bulk_updates_keywords() -> None:
             json_response(
                 {
                     "operation": "add_tags",
-                    "results": [{"keyword_id": "kw_1", "status": "updated"}],
+                    "results": [{"keyword_id": "kw_a00000000000000000000000", "status": "updated"}],
                 }
             )
         ]
@@ -2185,14 +2719,16 @@ def test_bulk_updates_keywords() -> None:
     client = make_client(queue)
 
     result = client.bulk_update_keywords(
-        KeywordBulkInput(keyword_ids=["kw_1"], operation="add_tags", tags=["Product"])
+        KeywordBulkInput(
+            keyword_ids=["kw_a00000000000000000000000"], operation="add_tags", tags=["Product"]
+        )
     )
 
     assert result.operation == "add_tags"
     assert str(queue.requests[-1].url) == "https://api.test/api/v1/keywords/bulk"
     assert queue.requests[-1].method == "POST"
     assert request_json(queue.requests[-1]) == {
-        "keyword_ids": ["kw_1"],
+        "keyword_ids": ["kw_a00000000000000000000000"],
         "operation": "add_tags",
         "tags": ["Product"],
     }
@@ -2202,46 +2738,57 @@ def test_lists_runs_and_gets_rank_checks() -> None:
     since = datetime(2026, 1, 1, tzinfo=timezone.utc)
     queue = QueueTransport(
         [
-            json_response(list_response([rank_check()], "cursor_2")),
+            json_response(list_response([rank_check()], "eyJ2IjozLCJvIjoyfQ")),
             json_response(rank_check(), 201),
-            json_response(rank_check(id="check_2")),
+            json_response(rank_check(id="check_b00000000000000000000000")),
         ]
     )
     client = make_client(queue)
 
     assert (
         client.list_rank_checks(
-            "kw_1",
+            "kw_a00000000000000000000000",
             {
-                "cursor": "cursor_1",
+                "cursor": "eyJ2IjozLCJvIjoxfQ",
                 "limit": 5,
                 "since": since,
                 "status": "failed",
                 "until": "2026-01-31T00:00:00.000Z",
             },
         ).meta.next_cursor
-        == "cursor_2"
+        == "eyJ2IjozLCJvIjoyfQ"
     )
-    run_result = client.run_rank_check("kw_1", RunRankCheckInput(provider_id="dataforseo"))
-    assert run_result.id == "check_1"
-    assert client.get_rank_check_result("check_2").id == "check_2"
+    run_result = client.run_rank_check(
+        "kw_a00000000000000000000000", RunRankCheckInput(provider_id="dataforseo")
+    )
+    assert run_result.id == "check_a00000000000000000000000"
+    assert (
+        client.get_rank_check_result("check_b00000000000000000000000").id
+        == "check_b00000000000000000000000"
+    )
 
     assert str(queue.requests[0].url) == (
-        "https://api.test/api/v1/keywords/kw_1/rank-checks?"
-        "cursor=cursor_1&limit=5&since=2026-01-01T00%3A00%3A00Z&status=failed&"
+        "https://api.test/api/v1/keywords/kw_a00000000000000000000000/rank-checks?"
+        "cursor=eyJ2IjozLCJvIjoxfQ&limit=5&since=2026-01-01T00%3A00%3A00Z&status=failed&"
         "until=2026-01-31T00%3A00%3A00.000Z"
     )
-    assert str(queue.requests[1].url) == "https://api.test/api/v1/keywords/kw_1/checks"
+    assert (
+        str(queue.requests[1].url)
+        == "https://api.test/api/v1/keywords/kw_a00000000000000000000000/checks"
+    )
     assert queue.requests[1].method == "POST"
     assert request_json(queue.requests[1]) == {"provider_id": "dataforseo"}
-    assert str(queue.requests[2].url) == "https://api.test/api/v1/rank-checks/check_2"
+    assert (
+        str(queue.requests[2].url)
+        == "https://api.test/api/v1/rank-checks/check_b00000000000000000000000"
+    )
 
 
 def test_omits_body_for_rank_check_without_provider_input() -> None:
     queue = QueueTransport([json_response(rank_check(), 201)])
     client = make_client(queue)
 
-    client.run_rank_check("kw_1")
+    client.run_rank_check("kw_a00000000000000000000000")
 
     assert queue.requests[-1].content == b""
     assert "Content-Type" not in queue.requests[-1].headers
@@ -2257,7 +2804,7 @@ def test_rank_check_exposes_provider_fallback_attempts() -> None:
     )
     client = make_client(queue)
 
-    check = client.get_rank_check_result("check_1")
+    check = client.get_rank_check_result("check_a00000000000000000000000")
 
     assert check.status == "failed"
     assert check.attempts is not None
@@ -2274,20 +2821,26 @@ def test_runs_rank_check_in_async_mode() -> None:
     )
     client = make_client(queue)
 
-    accepted = client.run_rank_check("kw_1", async_mode=True)
+    accepted = client.run_rank_check("kw_a00000000000000000000000", async_mode=True)
     assert accepted.status == "running"
     assert (
         client.run_rank_check(
-            "kw_1",
+            "kw_a00000000000000000000000",
             RunRankCheckInput(provider_id="dataforseo"),
             async_mode=True,
         ).status
         == "running"
     )
 
-    assert str(queue.requests[0].url) == "https://api.test/api/v1/keywords/kw_1/checks?async=true"
+    assert (
+        str(queue.requests[0].url)
+        == "https://api.test/api/v1/keywords/kw_a00000000000000000000000/checks?async=true"
+    )
     assert queue.requests[0].content == b""
-    assert str(queue.requests[1].url) == "https://api.test/api/v1/keywords/kw_1/checks?async=true"
+    assert (
+        str(queue.requests[1].url)
+        == "https://api.test/api/v1/keywords/kw_a00000000000000000000000/checks?async=true"
+    )
     assert request_json(queue.requests[1]) == {"provider_id": "dataforseo"}
 
 
@@ -2297,11 +2850,11 @@ def test_lists_rank_checks_filtered_by_running_status() -> None:
     )
     client = make_client(queue)
 
-    result = client.list_rank_checks("kw_1", {"status": "running"})
+    result = client.list_rank_checks("kw_a00000000000000000000000", {"status": "running"})
 
     assert result.data[0].status == "running"
     assert str(queue.requests[-1].url) == (
-        "https://api.test/api/v1/keywords/kw_1/rank-checks?status=running"
+        "https://api.test/api/v1/keywords/kw_a00000000000000000000000/rank-checks?status=running"
     )
 
 
@@ -2312,7 +2865,7 @@ def test_creates_signal_with_typed_input() -> None:
     created = client.create_signal(
         CreateSignalInput(
             happened_at=datetime(2026, 7, 4, 19, 30, tzinfo=timezone.utc),
-            keyword_id="kw_1",
+            keyword_id="kw_a00000000000000000000000",
             payload={"version": "1.2.3"},
             severity="warning",
             source="deploy",
@@ -2322,10 +2875,10 @@ def test_creates_signal_with_typed_input() -> None:
         request_options=RequestOptions(idempotency_key="idem_signal"),
     )
 
-    assert created.id == "sig_1"
-    assert created.public_id == "sig_1"
-    assert created.project_id == "prj_1"
-    assert created.keyword_id == "kw_1"
+    assert created.id == "sig_a00000000000000000000000"
+    assert created.public_id == "sig_a00000000000000000000000"
+    assert created.project_id == "prj_a00000000000000000000000"
+    assert created.keyword_id == "kw_a00000000000000000000000"
     assert created.severity == "warning"
     assert created.payload == {"version": "1.2.3"}
     request = queue.requests[-1]
@@ -2334,7 +2887,7 @@ def test_creates_signal_with_typed_input() -> None:
     assert request.headers["Idempotency-Key"] == "idem_signal"
     assert request_json(request) == {
         "happened_at": "2026-07-04T19:30:00Z",
-        "keyword_id": "kw_1",
+        "keyword_id": "kw_a00000000000000000000000",
         "payload": {"version": "1.2.3"},
         "severity": "warning",
         "source": "deploy",
@@ -2381,8 +2934,14 @@ def test_lists_project_signals_with_filters_and_cursor() -> None:
         [
             json_response(
                 list_response(
-                    [signal(id="sig_2", public_id="sig_2"), signal()],
-                    "cursor_next",
+                    [
+                        signal(
+                            id="sig_b00000000000000000000000",
+                            public_id="sig_b00000000000000000000000",
+                        ),
+                        signal(),
+                    ],
+                    "eyJ2IjozLCJvIjo4fQ",
                 )
             )
         ]
@@ -2390,9 +2949,9 @@ def test_lists_project_signals_with_filters_and_cursor() -> None:
     client = make_client(queue)
 
     result = client.list_project_signals(
-        "prj_1",
+        "prj_a00000000000000000000000",
         ListSignalsOptions(
-            cursor="cursor_1",
+            cursor="eyJ2IjozLCJvIjoxfQ",
             from_="2026-07-01T00:00:00.000Z",
             limit=50,
             source="deploy",
@@ -2401,12 +2960,15 @@ def test_lists_project_signals_with_filters_and_cursor() -> None:
         ),
     )
 
-    assert [item.public_id for item in result.data] == ["sig_2", "sig_1"]
+    assert [item.public_id for item in result.data] == [
+        "sig_b00000000000000000000000",
+        "sig_a00000000000000000000000",
+    ]
     assert result.data[0].source == "deploy"
-    assert result.meta.next_cursor == "cursor_next"
+    assert result.meta.next_cursor == "eyJ2IjozLCJvIjo4fQ"
     assert str(queue.requests[-1].url) == (
-        "https://api.test/api/v1/projects/prj_1/signals?"
-        "cursor=cursor_1&from=2026-07-01T00%3A00%3A00.000Z&limit=50&source=deploy&"
+        "https://api.test/api/v1/projects/prj_a00000000000000000000000/signals?"
+        "cursor=eyJ2IjozLCJvIjoxfQ&from=2026-07-01T00%3A00%3A00.000Z&limit=50&source=deploy&"
         "to=2026-07-05T00%3A00%3A00Z&type=deploy.completed"
     )
 
@@ -2415,11 +2977,13 @@ def test_lists_project_signals_accepts_from_alias_in_mapping() -> None:
     queue = QueueTransport([json_response(list_response([signal()]))])
     client = make_client(queue)
 
-    result = client.list_project_signals("prj_1", {"from": "2026-07-01T00:00:00.000Z"})
+    result = client.list_project_signals(
+        "prj_a00000000000000000000000", {"from": "2026-07-01T00:00:00.000Z"}
+    )
 
     assert result.meta.next_cursor is None
     assert str(queue.requests[-1].url) == (
-        "https://api.test/api/v1/projects/prj_1/signals?from=2026-07-01T00%3A00%3A00.000Z"
+        "https://api.test/api/v1/projects/prj_a00000000000000000000000/signals?from=2026-07-01T00%3A00%3A00.000Z"
     )
 
 
@@ -2435,10 +2999,8 @@ def test_analytics_snapshot_query_and_sync_methods() -> None:
                             "created_at": "2026-07-02T00:00:00.000Z",
                             "date": "2026-07-01",
                             "engagement_rate": 0.7,
-                            "id": "traffic_1",
                             "key_events": 3.0,
                             "path": "/pricing",
-                            "project_id": "prj_1",
                             "provider": "ga4",
                             "scroll_depth": None,
                             "sessions": 42,
@@ -2453,7 +3015,11 @@ def test_analytics_snapshot_query_and_sync_methods() -> None:
             ),
             json_response(
                 {
-                    "connection": {"id": "gsc_1", "label": "Search Console", "provider": "gsc"},
+                    "connection": {
+                        "id": "conn_e00000000000000000000000",
+                        "label": "Search Console",
+                        "provider": "gsc",
+                    },
                     "rows": [
                         {
                             "clicks": 14,
@@ -2471,10 +3037,10 @@ def test_analytics_snapshot_query_and_sync_methods() -> None:
                     "connections": 1,
                     "keyword_snapshots": 2,
                     "page_snapshots": 3,
-                    "project_id": "prj_1",
+                    "project_id": "prj_a00000000000000000000000",
                     "runs": [
                         {
-                            "connection_id": "ga4_1",
+                            "connection_id": "conn_f00000000000000000000000",
                             "provider": "ga4",
                             "rows_fetched": 4,
                             "rows_matched": 3,
@@ -2491,7 +3057,7 @@ def test_analytics_snapshot_query_and_sync_methods() -> None:
     client = make_client(queue)
 
     snapshots = client.list_traffic_snapshots(
-        "prj_1",
+        "prj_a00000000000000000000000",
         ListTrafficSnapshotsOptions(
             end_date="2026-07-31",
             limit=25,
@@ -2501,9 +3067,9 @@ def test_analytics_snapshot_query_and_sync_methods() -> None:
         ),
     )
     stats = client.list_search_performance_query_stats(
-        "prj_1",
+        "prj_a00000000000000000000000",
         ListSearchPerformanceQueryStatsOptions(
-            connection_id="gsc_1",
+            connection_id="conn_e00000000000000000000000",
             end_date="2026-07-31",
             limit=100,
             query="rank tracker",
@@ -2511,7 +3077,7 @@ def test_analytics_snapshot_query_and_sync_methods() -> None:
         ),
     )
     sync = client.sync_project_traffic(
-        "prj_1", RequestOptions(idempotency_key="analytics-sync-001")
+        "prj_a00000000000000000000000", RequestOptions(idempotency_key="analytics-sync-001")
     )
 
     assert snapshots.rows[0].sessions == 42
@@ -2521,13 +3087,13 @@ def test_analytics_snapshot_query_and_sync_methods() -> None:
     assert sync.runs[0].status == "succeeded_with_data"
     assert sync.skipped[0].reason == "no_capability"
     assert str(queue.requests[0].url) == (
-        "https://api.test/api/v1/projects/prj_1/analytics/traffic-snapshots?"
+        "https://api.test/api/v1/projects/prj_a00000000000000000000000/analytics/traffic-snapshots?"
         "end_date=2026-07-31&limit=25&offset=5&path=%2Fpricing&path=%2Fdocs&"
         "start_date=2026-07-01"
     )
     assert str(queue.requests[1].url) == (
-        "https://api.test/api/v1/projects/prj_1/analytics/query-stats?"
-        "connection_id=gsc_1&end_date=2026-07-31&limit=100&query=rank+tracker&"
+        "https://api.test/api/v1/projects/prj_a00000000000000000000000/analytics/query-stats?"
+        "connection_id=conn_e00000000000000000000000&end_date=2026-07-31&limit=100&query=rank+tracker&"
         "start_date=2026-07-01"
     )
     assert queue.requests[2].method == "POST"
@@ -2537,9 +3103,9 @@ def test_analytics_snapshot_query_and_sync_methods() -> None:
 def test_alert_rule_methods_cover_rules_and_triggered_alerts() -> None:
     queue = QueueTransport(
         [
-            json_response(list_response([alert_rule()], "cursor_2")),
+            json_response(list_response([alert_rule()], "eyJ2IjozLCJvIjoyfQ")),
             json_response(list_response([triggered_alert()])),
-            json_response(alert_rule(id="rule_new"), 201),
+            json_response(alert_rule(id="alr_c00000000000000000000000"), 201),
             json_response(alert_rule(threshold_position=9)),
             json_response({"deleted": True}),
         ]
@@ -2554,19 +3120,33 @@ def test_alert_rule_methods_cover_rules_and_triggered_alerts() -> None:
         threshold_position=10,
     )
 
-    assert client.list_alert_rules("prj_1", {"cursor": "cursor_1", "limit": 1}).data[0].id == (
-        "rule_1"
+    assert client.list_alert_rules(
+        "prj_a00000000000000000000000", {"cursor": "eyJ2IjozLCJvIjoxfQ", "limit": 1}
+    ).data[0].id == ("alr_a00000000000000000000000")
+    assert (
+        client.list_triggered_alerts("prj_a00000000000000000000000").data[0].headline
+        == "Ranking drop"
     )
-    assert client.list_triggered_alerts("prj_1").data[0].headline == "Ranking drop"
-    assert client.create_alert_rule("prj_1", rule_input).id == "rule_new"
-    assert client.update_alert_rule("rule_1", {**rule_input.model_dump(), "threshold_position": 9})
-    assert client.delete_alert_rule("rule_1").deleted is True
+    assert (
+        client.create_alert_rule("prj_a00000000000000000000000", rule_input).id
+        == "alr_c00000000000000000000000"
+    )
+    assert client.update_alert_rule(
+        "alr_a00000000000000000000000", {**rule_input.model_dump(), "threshold_position": 9}
+    )
+    assert client.delete_alert_rule("alr_a00000000000000000000000").deleted is True
 
     assert str(queue.requests[0].url) == (
-        "https://api.test/api/v1/projects/prj_1/alert-rules?cursor=cursor_1&limit=1"
+        "https://api.test/api/v1/projects/prj_a00000000000000000000000/alert-rules?cursor=eyJ2IjozLCJvIjoxfQ&limit=1"
     )
-    assert str(queue.requests[1].url) == "https://api.test/api/v1/projects/prj_1/triggered-alerts"
-    assert str(queue.requests[2].url) == "https://api.test/api/v1/projects/prj_1/alert-rules"
+    assert (
+        str(queue.requests[1].url)
+        == "https://api.test/api/v1/projects/prj_a00000000000000000000000/triggered-alerts"
+    )
+    assert (
+        str(queue.requests[2].url)
+        == "https://api.test/api/v1/projects/prj_a00000000000000000000000/alert-rules"
+    )
     assert queue.requests[2].method == "POST"
     assert request_json(queue.requests[2]) == {
         "channels": ["email", "webhook"],
@@ -2576,10 +3156,16 @@ def test_alert_rule_methods_cover_rules_and_triggered_alerts() -> None:
         "target_type": "all",
         "threshold_position": 10,
     }
-    assert str(queue.requests[3].url) == "https://api.test/api/v1/alert-rules/rule_1"
+    assert (
+        str(queue.requests[3].url)
+        == "https://api.test/api/v1/alert-rules/alr_a00000000000000000000000"
+    )
     assert queue.requests[3].method == "PATCH"
     assert request_json(queue.requests[3])["threshold_position"] == 9
-    assert str(queue.requests[4].url) == "https://api.test/api/v1/alert-rules/rule_1"
+    assert (
+        str(queue.requests[4].url)
+        == "https://api.test/api/v1/alert-rules/alr_a00000000000000000000000"
+    )
     assert queue.requests[4].method == "DELETE"
 
 
@@ -2593,12 +3179,12 @@ def test_triggered_alert_mutations_map_results_and_paths() -> None:
     client = make_client(queue)
 
     muted = client.mute_triggered_alert(
-        "prj spaced",
-        "alert/1",
+        "prj_a00000000000000000000000",
+        "al_a00000000000000000000000",
         RequestOptions(idempotency_key="mute-1"),
     )
     marked = client.mark_project_alerts_read(
-        "prj spaced",
+        "prj_a00000000000000000000000",
         RequestOptions(idempotency_key="mark-1"),
     )
 
@@ -2606,10 +3192,10 @@ def test_triggered_alert_mutations_map_results_and_paths() -> None:
     assert muted.snoozed_until == "2026-07-23T10:00:00.000Z"
     assert marked.updated == 3
     assert str(queue.requests[0].url) == (
-        "https://api.test/api/v1/projects/prj%20spaced/triggered-alerts/alert%2F1/mute"
+        "https://api.test/api/v1/projects/prj_a00000000000000000000000/triggered-alerts/al_a00000000000000000000000/mute"
     )
     assert str(queue.requests[1].url) == (
-        "https://api.test/api/v1/projects/prj%20spaced/triggered-alerts/mark-read"
+        "https://api.test/api/v1/projects/prj_a00000000000000000000000/triggered-alerts/mark-read"
     )
     assert queue.requests[0].headers["Idempotency-Key"] == "mute-1"
     assert queue.requests[1].headers["Idempotency-Key"] == "mark-1"
@@ -2619,40 +3205,40 @@ def test_exports_rank_history_as_typed_json_or_raw_csv() -> None:
     csv = "keyword_id,keyword,checked_at,position,previous_position,ranking_url\n"
     queue = QueueTransport(
         [
-            json_response(list_response([rank_history_export_row()], "cursor_2")),
+            json_response(list_response([rank_history_export_row()], "eyJ2IjozLCJvIjoyfQ")),
             text_response(csv, headers={"Content-Type": "text/csv; charset=utf-8"}),
         ]
     )
     client = make_client(queue)
 
     result = client.export_rank_history(
-        "prj_1",
+        "prj_a00000000000000000000000",
         RankHistoryExportOptions(
-            cursor="cursor 1",
+            cursor="eyJ2IjozLCJvIjoxfQ",
             format="json",
             granularity="weekly",
-            keyword_ids=["kw 1", "kw/2"],
+            keyword_ids=["kw_a00000000000000000000000", "kw_b00000000000000000000000"],
             limit=2,
             range="90",
         ),
     )
     raw = client.export_rank_history(
-        "prj_1",
-        {"format": "csv", "keyword_ids": ["kw_1"]},
+        "prj_a00000000000000000000000",
+        {"format": "csv", "keyword_ids": ["kw_a00000000000000000000000"]},
     )
 
     assert not isinstance(result, str)
     assert result.data[0].checked_at == "2026-07-20T10:00:00.000Z"
     assert result.data[0].position == 4
-    assert result.meta.next_cursor == "cursor_2"
+    assert result.meta.next_cursor == "eyJ2IjozLCJvIjoyfQ"
     assert raw == csv
     assert str(queue.requests[0].url) == (
-        "https://api.test/api/v1/projects/prj_1/exports/rank-history?"
-        "cursor=cursor+1&format=json&granularity=weekly&keyword_id=kw+1&"
-        "keyword_id=kw%2F2&limit=2&range=90"
+        "https://api.test/api/v1/projects/prj_a00000000000000000000000/exports/rank-history?"
+        "cursor=eyJ2IjozLCJvIjoxfQ&format=json&granularity=weekly&keyword_id=kw_a00000000000000000000000&"
+        "keyword_id=kw_b00000000000000000000000&limit=2&range=90"
     )
     assert str(queue.requests[1].url) == (
-        "https://api.test/api/v1/projects/prj_1/exports/rank-history?format=csv&keyword_id=kw_1"
+        "https://api.test/api/v1/projects/prj_a00000000000000000000000/exports/rank-history?format=csv&keyword_id=kw_a00000000000000000000000"
     )
 
 
@@ -2665,10 +3251,10 @@ def test_lists_and_updates_sitemap_monitors() -> None:
     )
     client = make_client(queue)
 
-    listed = client.list_sitemap_monitors("prj spaced")
+    listed = client.list_sitemap_monitors("prj_a00000000000000000000000")
     updated = client.update_sitemap_monitor(
-        "prj spaced",
-        "monitor/1",
+        "prj_a00000000000000000000000",
+        "prj_a00000000000000000000000",
         SitemapMonitorPatch(enabled=False),
         RequestOptions(idempotency_key="monitor-1"),
     )
@@ -2678,10 +3264,10 @@ def test_lists_and_updates_sitemap_monitors() -> None:
     assert updated.enabled is False
     assert updated.status == "disabled"
     assert str(queue.requests[0].url) == (
-        "https://api.test/api/v1/projects/prj%20spaced/sitemap-monitors"
+        "https://api.test/api/v1/projects/prj_a00000000000000000000000/sitemap-monitors"
     )
     assert str(queue.requests[1].url) == (
-        "https://api.test/api/v1/projects/prj%20spaced/sitemap-monitors/monitor%2F1"
+        "https://api.test/api/v1/projects/prj_a00000000000000000000000/sitemap-monitors/prj_a00000000000000000000000"
     )
     assert queue.requests[1].method == "PATCH"
     assert queue.requests[1].headers["Idempotency-Key"] == "monitor-1"
@@ -2692,52 +3278,72 @@ def test_team_member_and_invite_methods() -> None:
     queue = QueueTransport(
         [
             json_response(list_response([team_member()])),
-            json_response(list_response([team_invite()], "next_invites")),
+            json_response(list_response([team_invite()], "eyJ2IjozLCJvIjoxMH0")),
             json_response(
                 {
                     "expires_at": "2026-01-08T00:00:00.000Z",
-                    "id": "inv_2",
+                    "id": "inv_b00000000000000000000000",
                     "invite_link": "https://app.test/invite/raw",
                 },
                 201,
             ),
-            json_response({"id": "inv_1"}),
-            json_response({"id": "inv_2"}),
+            json_response({"id": "inv_a00000000000000000000000"}),
+            json_response({"id": "inv_b00000000000000000000000"}),
         ]
     )
     client = make_client(queue)
 
-    assert client.list_team_members("prj_1").data[0].role_value == "owner"
-    assert client.list_team_invites("prj_1", {"limit": 25}).meta.next_cursor == "next_invites"
+    assert client.list_team_members("prj_a00000000000000000000000").data[0].role_value == "owner"
+    assert (
+        client.list_team_invites("prj_a00000000000000000000000", {"limit": 25}).meta.next_cursor
+        == "eyJ2IjozLCJvIjoxMH0"
+    )
     created = client.create_team_invite(
-        "prj_1",
+        "prj_a00000000000000000000000",
         CreateTeamInviteInput(email="new@example.com", role="viewer"),
     )
     assert created.invite_link.endswith("/invite/raw")
-    assert client.revoke_project_team_invite("prj_1", "inv_1").id == "inv_1"
-    assert client.revoke_team_invite("inv_2").id == "inv_2"
-
-    assert str(queue.requests[0].url) == "https://api.test/api/v1/projects/prj_1/team/members"
-    assert str(queue.requests[1].url) == (
-        "https://api.test/api/v1/projects/prj_1/team/invites?limit=25"
+    assert (
+        client.revoke_project_team_invite(
+            "prj_a00000000000000000000000", "inv_a00000000000000000000000"
+        ).id
+        == "inv_a00000000000000000000000"
     )
-    assert str(queue.requests[2].url) == "https://api.test/api/v1/projects/prj_1/team/invites"
+    assert (
+        client.revoke_team_invite("inv_b00000000000000000000000").id
+        == "inv_b00000000000000000000000"
+    )
+
+    assert (
+        str(queue.requests[0].url)
+        == "https://api.test/api/v1/projects/prj_a00000000000000000000000/team/members"
+    )
+    assert str(queue.requests[1].url) == (
+        "https://api.test/api/v1/projects/prj_a00000000000000000000000/team/invites?limit=25"
+    )
+    assert (
+        str(queue.requests[2].url)
+        == "https://api.test/api/v1/projects/prj_a00000000000000000000000/team/invites"
+    )
     assert request_json(queue.requests[2]) == {"email": "new@example.com", "role": "viewer"}
     assert str(queue.requests[3].url) == (
-        "https://api.test/api/v1/projects/prj_1/team/invites/inv_1"
+        "https://api.test/api/v1/projects/prj_a00000000000000000000000/team/invites/inv_a00000000000000000000000"
     )
-    assert str(queue.requests[4].url) == "https://api.test/api/v1/team/invites/inv_2"
+    assert (
+        str(queue.requests[4].url)
+        == "https://api.test/api/v1/team/invites/inv_b00000000000000000000000"
+    )
 
 
 def test_team_member_mutation_and_invite_resend_methods() -> None:
     queue = QueueTransport(
         [
-            json_response({"id": "member_1", "role": "admin"}),
-            json_response({"id": "member_2"}),
+            json_response({"id": "mbr_c00000000000000000000000", "role": "admin"}),
+            json_response({"id": "mbr_d00000000000000000000000"}),
             json_response(
                 {
                     "expires_at": "2026-07-29T10:00:00.000Z",
-                    "id": "invite_1",
+                    "id": "inv_c00000000000000000000000",
                     "invite_link": "https://app.test/invite/new-token",
                 }
             ),
@@ -2745,25 +3351,31 @@ def test_team_member_mutation_and_invite_resend_methods() -> None:
     )
     client = make_client(queue)
 
-    updated = client.update_team_member_role("prj_1", "member_1", {"role": "admin"})
-    removed = client.remove_team_member("prj_1", "member_2")
-    resent = client.resend_team_invite("prj_1", "invite_1")
+    updated = client.update_team_member_role(
+        "prj_a00000000000000000000000", "mbr_c00000000000000000000000", {"role": "admin"}
+    )
+    removed = client.remove_team_member(
+        "prj_a00000000000000000000000", "mbr_d00000000000000000000000"
+    )
+    resent = client.resend_team_invite(
+        "prj_a00000000000000000000000", "inv_c00000000000000000000000"
+    )
 
     assert updated.role == "admin"
-    assert removed.id == "member_2"
+    assert removed.id == "mbr_d00000000000000000000000"
     assert resent.invite_link.endswith("/new-token")
     assert queue.requests[0].method == "PATCH"
     assert request_json(queue.requests[0]) == {"role": "admin"}
     assert str(queue.requests[0].url) == (
-        "https://api.test/api/v1/projects/prj_1/team/members/member_1"
+        "https://api.test/api/v1/projects/prj_a00000000000000000000000/team/members/mbr_c00000000000000000000000"
     )
     assert queue.requests[1].method == "DELETE"
     assert str(queue.requests[1].url) == (
-        "https://api.test/api/v1/projects/prj_1/team/members/member_2"
+        "https://api.test/api/v1/projects/prj_a00000000000000000000000/team/members/mbr_d00000000000000000000000"
     )
     assert queue.requests[2].method == "POST"
     assert str(queue.requests[2].url) == (
-        "https://api.test/api/v1/projects/prj_1/team/invites/invite_1/resend"
+        "https://api.test/api/v1/projects/prj_a00000000000000000000000/team/invites/inv_c00000000000000000000000/resend"
     )
 
 
@@ -2771,7 +3383,7 @@ def test_provider_methods_and_settings_helpers() -> None:
     queue = QueueTransport(
         [
             json_response(list_response([provider()])),
-            json_response(provider_connection(id="pc_connect"), 201),
+            json_response(provider_connection(id="conn_b00000000000000000000000"), 201),
             json_response({"balance": 42, "message": "Provider ready", "ok": True}),
             json_response(provider_connection(enabled=False, priority=20)),
             json_response(provider_connection(enabled=True)),
@@ -2782,10 +3394,10 @@ def test_provider_methods_and_settings_helpers() -> None:
     )
     client = make_client(queue)
 
-    assert client.list_providers("prj_1").data[0].drawer is not None
+    assert client.list_providers("prj_a00000000000000000000000").data[0].drawer is not None
     assert (
         client.connect_provider(
-            "prj_1",
+            "prj_a00000000000000000000000",
             "serpapi",
             ConnectProviderInput(
                 cost_per_check=0.01,
@@ -2793,25 +3405,32 @@ def test_provider_methods_and_settings_helpers() -> None:
                 primary=True,
             ),
         ).id
-        == "pc_connect"
+        == "conn_b00000000000000000000000"
     )
     assert (
         client.test_provider_connection(
-            "prj_1",
+            "prj_a00000000000000000000000",
             "serpapi",
             ProviderConnectionTestInput(credentials=ProviderCredentialsInput(api_key="secret")),
         ).ok
         is True
     )
-    assert client.update_provider_settings("prj_1", "serpapi", {"enabled": False, "priority": 20})
-    assert client.set_provider_enabled("prj_1", "serpapi", True).enabled is True
-    assert client.set_provider_priority("prj_1", "serpapi", 5).priority == 5
-    assert client.set_primary_provider("prj_1", "serpapi").is_primary is True
-    assert client.disconnect_provider("prj_1", "serpapi").ok is True
+    assert client.update_provider_settings(
+        "prj_a00000000000000000000000", "serpapi", {"enabled": False, "priority": 20}
+    )
+    assert (
+        client.set_provider_enabled("prj_a00000000000000000000000", "serpapi", True).enabled is True
+    )
+    assert client.set_provider_priority("prj_a00000000000000000000000", "serpapi", 5).priority == 5
+    assert client.set_primary_provider("prj_a00000000000000000000000", "serpapi").is_primary is True
+    assert client.disconnect_provider("prj_a00000000000000000000000", "serpapi").ok is True
 
-    assert str(queue.requests[0].url) == "https://api.test/api/v1/projects/prj_1/providers"
+    assert (
+        str(queue.requests[0].url)
+        == "https://api.test/api/v1/projects/prj_a00000000000000000000000/providers"
+    )
     assert str(queue.requests[1].url) == (
-        "https://api.test/api/v1/projects/prj_1/providers/serpapi/connect"
+        "https://api.test/api/v1/projects/prj_a00000000000000000000000/providers/serpapi/connect"
     )
     assert request_json(queue.requests[1]) == {
         "cost_per_check": 0.01,
@@ -2819,7 +3438,7 @@ def test_provider_methods_and_settings_helpers() -> None:
         "primary": True,
     }
     assert str(queue.requests[2].url) == (
-        "https://api.test/api/v1/projects/prj_1/providers/serpapi/test"
+        "https://api.test/api/v1/projects/prj_a00000000000000000000000/providers/serpapi/test"
     )
     assert request_json(queue.requests[2]) == {"credentials": {"api_key": "secret"}}
     assert request_json(queue.requests[3]) == {"enabled": False, "priority": 20}
@@ -2833,7 +3452,9 @@ def test_connects_plausible_provider_with_endpoint_credential() -> None:
     queue = QueueTransport(
         [
             json_response(
-                provider_connection(id="pc_plausible", kind="analytics", provider="plausible"),
+                provider_connection(
+                    id="conn_c00000000000000000000000", kind="analytics", provider="plausible"
+                ),
                 201,
             )
         ]
@@ -2841,7 +3462,7 @@ def test_connects_plausible_provider_with_endpoint_credential() -> None:
     client = make_client(queue)
 
     connection = client.connect_provider(
-        "prj_1",
+        "prj_a00000000000000000000000",
         "plausible",
         ConnectProviderInput(
             credentials=ProviderCredentialsInput(
@@ -2854,7 +3475,7 @@ def test_connects_plausible_provider_with_endpoint_credential() -> None:
     assert connection.provider == "plausible"
     assert connection.kind == "analytics"
     assert str(queue.requests[-1].url) == (
-        "https://api.test/api/v1/projects/prj_1/providers/plausible/connect"
+        "https://api.test/api/v1/projects/prj_a00000000000000000000000/providers/plausible/connect"
     )
     assert request_json(queue.requests[-1]) == {
         "credentials": {
@@ -2867,8 +3488,8 @@ def test_connects_plausible_provider_with_endpoint_credential() -> None:
 def test_saved_view_methods() -> None:
     queue = QueueTransport(
         [
-            json_response(list_response([saved_view()], "views_next")),
-            json_response(saved_view(id="view_2", name="Top 10"), 201),
+            json_response(list_response([saved_view()], "eyJ2IjozLCJvIjozfQ")),
+            json_response(saved_view(id="viw_b00000000000000000000000", name="Top 10"), 201),
             json_response({"deleted": True}),
             json_response({"deleted": False}),
         ]
@@ -2893,15 +3514,23 @@ def test_saved_view_methods() -> None:
         ),
     )
 
-    assert client.list_saved_views("prj_1", {"cursor": "cursor_1"}).meta.next_cursor == (
-        "views_next"
+    assert client.list_saved_views(
+        "prj_a00000000000000000000000", {"cursor": "eyJ2IjozLCJvIjoxfQ"}
+    ).meta.next_cursor == ("eyJ2IjozLCJvIjozfQ")
+    assert (
+        client.create_saved_view("prj_a00000000000000000000000", input_model).id
+        == "viw_b00000000000000000000000"
     )
-    assert client.create_saved_view("prj_1", input_model).id == "view_2"
-    assert client.delete_project_saved_view("prj_1", "view_1").deleted is True
-    assert client.delete_saved_view("view_2").deleted is False
+    assert (
+        client.delete_project_saved_view(
+            "prj_a00000000000000000000000", "viw_a00000000000000000000000"
+        ).deleted
+        is True
+    )
+    assert client.delete_saved_view("viw_b00000000000000000000000").deleted is False
 
     assert str(queue.requests[0].url) == (
-        "https://api.test/api/v1/projects/prj_1/saved-views?cursor=cursor_1"
+        "https://api.test/api/v1/projects/prj_a00000000000000000000000/saved-views?cursor=eyJ2IjozLCJvIjoxfQ"
     )
     assert request_json(queue.requests[1]) == {
         "config": {
@@ -2922,9 +3551,12 @@ def test_saved_view_methods() -> None:
         "name": "Top 10",
     }
     assert str(queue.requests[2].url) == (
-        "https://api.test/api/v1/projects/prj_1/saved-views/view_1"
+        "https://api.test/api/v1/projects/prj_a00000000000000000000000/saved-views/viw_a00000000000000000000000"
     )
-    assert str(queue.requests[3].url) == "https://api.test/api/v1/saved-views/view_2"
+    assert (
+        str(queue.requests[3].url)
+        == "https://api.test/api/v1/saved-views/viw_b00000000000000000000000"
+    )
 
 
 def test_competitor_methods_include_list_meta() -> None:
@@ -2940,31 +3572,46 @@ def test_competitor_methods_include_list_meta() -> None:
                     },
                 }
             ),
-            json_response(competitor(id="comp_2", initials=None, label=None), 201),
+            json_response(
+                competitor(id="cmp_b00000000000000000000000", initials=None, label=None), 201
+            ),
             json_response({"removed": True}),
             json_response({"removed": True}),
         ]
     )
     client = make_client(queue)
 
-    competitors = client.list_competitors("prj_1", {"limit": 10})
+    competitors = client.list_competitors("prj_a00000000000000000000000", {"limit": 10})
     assert competitors.data[0].domain == "rankzly.io"
     assert competitors.meta.markets is not None
     assert competitors.meta.markets[0].shares[0].share_of_voice == 40
     assert competitors.meta.suggestions is not None
     assert competitors.meta.suggestions[0].domain == "newrank.io"
-    assert client.add_competitor("prj_1", AddCompetitorInput(domain="rankzly.io")).id == "comp_2"
-    assert client.remove_project_competitor("prj_1", "comp_1").removed is True
-    assert client.remove_competitor("comp_2").removed is True
+    assert (
+        client.add_competitor(
+            "prj_a00000000000000000000000", AddCompetitorInput(domain="rankzly.io")
+        ).id
+        == "cmp_b00000000000000000000000"
+    )
+    assert (
+        client.remove_project_competitor(
+            "prj_a00000000000000000000000", "cmp_a00000000000000000000000"
+        ).removed
+        is True
+    )
+    assert client.remove_competitor("cmp_b00000000000000000000000").removed is True
 
     assert str(queue.requests[0].url) == (
-        "https://api.test/api/v1/projects/prj_1/competitors?limit=10"
+        "https://api.test/api/v1/projects/prj_a00000000000000000000000/competitors?limit=10"
     )
     assert request_json(queue.requests[1]) == {"domain": "rankzly.io"}
     assert str(queue.requests[2].url) == (
-        "https://api.test/api/v1/projects/prj_1/competitors/comp_1"
+        "https://api.test/api/v1/projects/prj_a00000000000000000000000/competitors/cmp_a00000000000000000000000"
     )
-    assert str(queue.requests[3].url) == "https://api.test/api/v1/competitors/comp_2"
+    assert (
+        str(queue.requests[3].url)
+        == "https://api.test/api/v1/competitors/cmp_b00000000000000000000000"
+    )
 
 
 def test_notification_preferences_methods() -> None:
@@ -2984,15 +3631,18 @@ def test_notification_preferences_methods() -> None:
     )
     client = make_client(queue)
 
-    assert client.get_notification_preferences("prj_1").email == "owner@example.com"
+    assert (
+        client.get_notification_preferences("prj_a00000000000000000000000").email
+        == "owner@example.com"
+    )
     updated = client.update_notification_preferences(
-        "prj_1",
+        "prj_a00000000000000000000000",
         NotificationPreferencesPatch(alert_slack=True, check_email=True),
     )
     assert updated.alert_slack is True
 
     assert str(queue.requests[0].url) == (
-        "https://api.test/api/v1/projects/prj_1/notification-preferences"
+        "https://api.test/api/v1/projects/prj_a00000000000000000000000/notification-preferences"
     )
     assert queue.requests[1].method == "PATCH"
     assert request_json(queue.requests[1]) == {"alert_slack": True, "check_email": True}
@@ -3001,7 +3651,7 @@ def test_notification_preferences_methods() -> None:
 def test_migration_token_methods() -> None:
     issued = {
         **migration_token(created_by=None),
-        "import_job": cloud_import_job(id="job_1"),
+        "import_job": cloud_import_job(id="imp_b00000000000000000000000"),
         "token": "mig_secret_value_1234567890",
     }
     queue = QueueTransport(
@@ -3013,59 +3663,78 @@ def test_migration_token_methods() -> None:
                 }
             ),
             json_response(issued, 201),
-            json_response({"id": "tok_1", "revoked_at": "2026-01-01T00:10:00.000Z"}),
-            json_response({"id": "tok_2", "revoked_at": "2026-01-01T00:20:00.000Z"}),
+            json_response(
+                {"id": "ferry_a00000000000000000000000", "revoked_at": "2026-01-01T00:10:00.000Z"}
+            ),
+            json_response(
+                {"id": "ferry_b00000000000000000000000", "revoked_at": "2026-01-01T00:20:00.000Z"}
+            ),
         ]
     )
     client = make_client(queue)
 
-    tokens = client.list_migration_tokens("prj_1")
+    tokens = client.list_migration_tokens("prj_a00000000000000000000000")
     assert tokens.data[0].scope == "full"
     assert tokens.meta.import_job is not None
     assert tokens.meta.import_job.state == "idle"
-    minted = client.mint_migration_token("prj_1", MintMigrationTokenInput(scope="keywords"))
+    minted = client.mint_migration_token(
+        "prj_a00000000000000000000000", MintMigrationTokenInput(scope="keywords")
+    )
     assert minted.token.startswith("mig_")
-    assert client.revoke_project_migration_token("prj_1", "tok_1").id == "tok_1"
-    assert client.revoke_migration_token("tok_2").revoked_at.endswith("00.000Z")
+    assert (
+        client.revoke_project_migration_token(
+            "prj_a00000000000000000000000", "ferry_a00000000000000000000000"
+        ).id
+        == "ferry_a00000000000000000000000"
+    )
+    assert client.revoke_migration_token("ferry_b00000000000000000000000").revoked_at.endswith(
+        "00.000Z"
+    )
 
-    assert str(queue.requests[0].url) == "https://api.test/api/v1/projects/prj_1/migration-tokens"
+    assert (
+        str(queue.requests[0].url)
+        == "https://api.test/api/v1/projects/prj_a00000000000000000000000/migration-tokens"
+    )
     assert request_json(queue.requests[1]) == {"scope": "keywords"}
     assert str(queue.requests[2].url) == (
-        "https://api.test/api/v1/projects/prj_1/migration-tokens/tok_1"
+        "https://api.test/api/v1/projects/prj_a00000000000000000000000/migration-tokens/ferry_a00000000000000000000000"
     )
-    assert str(queue.requests[3].url) == "https://api.test/api/v1/migration-tokens/tok_2"
+    assert (
+        str(queue.requests[3].url)
+        == "https://api.test/api/v1/migration-tokens/ferry_b00000000000000000000000"
+    )
 
 
 @pytest.mark.parametrize(
     ("operation", "expected_url"),
     [
         (
-            lambda client: client.list_alert_rules("prj_1"),
-            "https://api.test/api/v1/projects/prj_1/alert-rules",
+            lambda client: client.list_alert_rules("prj_a00000000000000000000000"),
+            "https://api.test/api/v1/projects/prj_a00000000000000000000000/alert-rules",
         ),
         (
-            lambda client: client.list_team_members("prj_1"),
-            "https://api.test/api/v1/projects/prj_1/team/members",
+            lambda client: client.list_team_members("prj_a00000000000000000000000"),
+            "https://api.test/api/v1/projects/prj_a00000000000000000000000/team/members",
         ),
         (
-            lambda client: client.list_providers("prj_1"),
-            "https://api.test/api/v1/projects/prj_1/providers",
+            lambda client: client.list_providers("prj_a00000000000000000000000"),
+            "https://api.test/api/v1/projects/prj_a00000000000000000000000/providers",
         ),
         (
-            lambda client: client.list_saved_views("prj_1"),
-            "https://api.test/api/v1/projects/prj_1/saved-views",
+            lambda client: client.list_saved_views("prj_a00000000000000000000000"),
+            "https://api.test/api/v1/projects/prj_a00000000000000000000000/saved-views",
         ),
         (
-            lambda client: client.list_competitors("prj_1"),
-            "https://api.test/api/v1/projects/prj_1/competitors",
+            lambda client: client.list_competitors("prj_a00000000000000000000000"),
+            "https://api.test/api/v1/projects/prj_a00000000000000000000000/competitors",
         ),
         (
-            lambda client: client.get_notification_preferences("prj_1"),
-            "https://api.test/api/v1/projects/prj_1/notification-preferences",
+            lambda client: client.get_notification_preferences("prj_a00000000000000000000000"),
+            "https://api.test/api/v1/projects/prj_a00000000000000000000000/notification-preferences",
         ),
         (
-            lambda client: client.list_migration_tokens("prj_1"),
-            "https://api.test/api/v1/projects/prj_1/migration-tokens",
+            lambda client: client.list_migration_tokens("prj_a00000000000000000000000"),
+            "https://api.test/api/v1/projects/prj_a00000000000000000000000/migration-tokens",
         ),
     ],
 )
@@ -3076,7 +3745,7 @@ def test_new_endpoint_groups_raise_problem_detail_errors(
     problem = {
         "detail": "API key scope does not allow this operation.",
         "docs_url": "https://bisibility.com/docs/api/errors#forbidden",
-        "instance": "urn:bisibility:api:v1:/api/v1/projects/prj_1",
+        "instance": "urn:bisibility:api:v1:/api/v1/projects/prj_a00000000000000000000000",
         "status": 403,
         "title": "Forbidden",
         "type": "https://bisibility.dev/problems/forbidden",
@@ -3099,7 +3768,7 @@ def test_returns_none_for_empty_success_response() -> None:
     queue = QueueTransport([httpx.Response(204)])
     client = make_client(queue)
 
-    assert client.delete_keyword("kw_1") is None
+    assert client.delete_keyword("kw_a00000000000000000000000") is None
 
 
 def test_raises_configuration_error_when_protected_method_has_no_api_key() -> None:
@@ -3120,7 +3789,7 @@ def test_raises_api_error_with_problem_details() -> None:
     problem = {
         "detail": "Keyword not found.",
         "docs_url": "https://bisibility.com/docs/api/errors#not_found",
-        "instance": "urn:bisibility:api:v1:/api/v1/keywords/kw_missing",
+        "instance": "urn:bisibility:api:v1:/api/v1/keywords/kw_d00000000000000000000000",
         "status": 404,
         "title": "Not found",
         "type": "https://bisibility.dev/problems/not_found",
@@ -3144,7 +3813,7 @@ def test_raises_api_error_with_problem_details() -> None:
     client = make_client(queue)
 
     with pytest.raises(BisibilityApiError) as exc_info:
-        client.get_keyword("kw_missing")
+        client.get_keyword("kw_d00000000000000000000000")
 
     error = exc_info.value
     assert str(error) == "Keyword not found."
@@ -3281,7 +3950,7 @@ def test_retries_transport_errors_until_success(recorded_sleeps: list[float]) ->
     )
     client = make_client(queue)
 
-    assert client.list_projects().data[0].id == "prj_1"
+    assert client.list_projects().data[0].id == "prj_a00000000000000000000000"
     assert len(queue.requests) == 3
     assert recorded_sleeps == [0.5, 1.0]
 
@@ -3303,7 +3972,7 @@ def test_retries_429_honoring_retry_after_header(recorded_sleeps: list[float]) -
     )
     client = make_client(queue)
 
-    assert client.list_projects().data[0].id == "prj_1"
+    assert client.list_projects().data[0].id == "prj_a00000000000000000000000"
     assert recorded_sleeps == [3.0]
 
 
@@ -3316,7 +3985,7 @@ def test_retries_429_honoring_http_date_retry_after(recorded_sleeps: list[float]
     )
     client = make_client(queue)
 
-    assert client.list_projects().data[0].id == "prj_1"
+    assert client.list_projects().data[0].id == "prj_a00000000000000000000000"
     assert recorded_sleeps == [60.0]
 
 
@@ -3332,7 +4001,7 @@ def test_retries_503_with_exponential_backoff_when_retry_after_missing(
     )
     client = make_client(queue, max_retries=3)
 
-    assert client.list_projects().data[0].id == "prj_1"
+    assert client.list_projects().data[0].id == "prj_a00000000000000000000000"
     assert recorded_sleeps == [0.5, 1.0]
 
 
@@ -3347,7 +4016,7 @@ def test_caps_retry_after_and_backoff_delays(recorded_sleeps: list[float]) -> No
     )
     client = make_client(queue, max_retries=7)
 
-    assert client.list_projects().data[0].id == "prj_1"
+    assert client.list_projects().data[0].id == "prj_a00000000000000000000000"
     assert recorded_sleeps == [60.0, 1.0, 2.0, 4.0, 8.0, 8.0, 8.0]
 
 
@@ -3428,8 +4097,8 @@ def test_does_not_retry_post_transport_error_without_idempotency_key(
 
 def test_retries_post_with_idempotency_key(recorded_sleeps: list[float]) -> None:
     created = {
-        **api_key_resource(id="key_new", name="CI"),
-        "masked_value": "bsk_live_12345678******cdef",
+        **api_key_resource(id="key_c00000000000000000000000", name="CI"),
+        "masked_value": "bsb_key_live_12345678******cdef",
         "token": API_KEY,
     }
     queue = QueueTransport([httpx.Response(503), json_response(created, 201)])
@@ -3440,7 +4109,7 @@ def test_retries_post_with_idempotency_key(recorded_sleeps: list[float]) -> None
         request_options=RequestOptions(idempotency_key="idem_1"),
     )
 
-    assert result.id == "key_new"
+    assert result.id == "key_c00000000000000000000000"
     assert len(queue.requests) == 2
     assert all(request.headers["Idempotency-Key"] == "idem_1" for request in queue.requests)
     assert recorded_sleeps == [0.5]
@@ -3450,7 +4119,7 @@ def test_retries_get_requests_on_503(recorded_sleeps: list[float]) -> None:
     queue = QueueTransport([httpx.Response(503), json_response(list_response([project()]))])
     client = make_client(queue)
 
-    assert client.list_projects().data[0].id == "prj_1"
+    assert client.list_projects().data[0].id == "prj_a00000000000000000000000"
     assert len(queue.requests) == 2
     assert queue.requests[0].method == "GET"
     assert recorded_sleeps == [0.5]
@@ -3462,7 +4131,9 @@ def test_retries_delete_requests_without_idempotency_key(
     queue = QueueTransport([httpx.Response(503), json_response(project())])
     client = make_client(queue)
 
-    assert client.delete_project("prj_1").id == "prj_1"
+    assert (
+        client.delete_project("prj_a00000000000000000000000").id == "prj_a00000000000000000000000"
+    )
     assert [request.method for request in queue.requests] == ["DELETE", "DELETE"]
     assert recorded_sleeps == [0.5]
 
@@ -3486,7 +4157,7 @@ def test_closes_discarded_retryable_responses(recorded_sleeps: list[float]) -> N
     )
     client = make_client(queue, max_retries=2)
 
-    assert client.list_projects().data[0].id == "prj_1"
+    assert client.list_projects().data[0].id == "prj_a00000000000000000000000"
     assert close_calls == [1, 1]
     assert recorded_sleeps == [0.5, 1.0]
 
@@ -3505,7 +4176,7 @@ def test_exposes_factory_helper_and_context_manager() -> None:
         transport=queue.transport(),
     ) as client:
         assert isinstance(client, BisibilityClient)
-        assert client.list_projects().data[0].id == "prj_1"
+        assert client.list_projects().data[0].id == "prj_a00000000000000000000000"
 
 
 CHUNK_CHECKSUM = "sha256:" + "a" * 64
@@ -3518,7 +4189,7 @@ def test_get_cloud_import_compatibility_requires_no_auth() -> None:
                 {
                     "app_version": "1.4.2",
                     "latest_migration": "0042_cloud_import",
-                    "schema_versions_supported": [1, 2, 3],
+                    "schema_versions_supported": [5],
                 }
             )
         ]
@@ -3527,7 +4198,7 @@ def test_get_cloud_import_compatibility_requires_no_auth() -> None:
 
     compatibility = client.get_cloud_import_compatibility()
 
-    assert compatibility.schema_versions_supported == [1, 2, 3]
+    assert compatibility.schema_versions_supported == [5]
     assert compatibility.latest_migration == "0042_cloud_import"
     assert compatibility.app_version == "1.4.2"
     request = queue.requests[0]
@@ -3540,7 +4211,11 @@ def test_import_cloud_export_posts_package_with_migration_token() -> None:
     queue = QueueTransport(
         [
             json_response(
-                {"counts": {"keywords": 3}, "job_id": "job_1", "state": "done"},
+                {
+                    "counts": {"keywords": 3},
+                    "job_id": "imp_b00000000000000000000000",
+                    "state": "done",
+                },
                 201,
             )
         ]
@@ -3551,18 +4226,39 @@ def test_import_cloud_export_posts_package_with_migration_token() -> None:
         transport=queue.transport(),
     )
 
-    result = client.import_cloud_export(
-        CloudImportPackage(version=3, scope="current", project_id="prj_1")
-    )
+    package = cloud_import_package(scope="current")
+    result = client.import_cloud_export(CloudImportPackage.model_validate(package))
 
     assert result.state == "done"
-    assert result.job_id == "job_1"
+    assert result.job_id == "imp_b00000000000000000000000"
     assert result.counts == {"keywords": 3}
     request = queue.requests[0]
     assert request.method == "POST"
     assert str(request.url) == "https://api.test/api/v1/cloud/import"
     assert request.headers["Authorization"] == "Bearer mig_secret_value_1234567890"
-    assert request_json(request) == {"version": 3, "scope": "current", "project_id": "prj_1"}
+    assert request_json(request) == package
+
+
+def test_cloud_import_client_rejects_invalid_mapping_before_transport() -> None:
+    queue = QueueTransport([])
+    client = make_client(queue)
+
+    with pytest.raises(ValidationError):
+        client.import_cloud_export({"version": 5, "project_id": "prj_a00000000000000000000000"})
+
+    with pytest.raises(ValidationError):
+        client.create_cloud_import_session(
+            {"version": 5, "chunk_count": 1, "sourceProjectId": "prj_a00000000000000000000000"}
+        )
+
+    with pytest.raises(ValidationError):
+        client.upload_cloud_import_chunk(
+            "imp_a00000000000000000000000",
+            0,
+            {"checksum": CHUNK_CHECKSUM, "kind": "keywords", "keywords": [{"keyword": "seo"}]},
+        )
+
+    assert queue.requests == []
 
 
 def test_cloud_import_session_flow() -> None:
@@ -3575,14 +4271,20 @@ def test_cloud_import_session_flow() -> None:
                         "max_history_rows": 5000,
                         "max_keywords": 500,
                     },
-                    "session_id": "sess_1",
+                    "session_id": "imp_a00000000000000000000000",
                     "state": "receiving",
                 },
                 201,
             ),
             json_response({"chunk_count": 2, "chunks_received": 1, "state": "receiving"}),
             json_response({"chunk_count": 2, "chunks_received": 2, "state": "receiving"}),
-            json_response({"counts": {"keywords": 4}, "job_id": "job_2", "state": "done"}),
+            json_response(
+                {
+                    "counts": {"keywords": 4},
+                    "job_id": "imp_c00000000000000000000000",
+                    "state": "done",
+                }
+            ),
         ]
     )
     client = BisibilityClient(
@@ -3591,46 +4293,70 @@ def test_cloud_import_session_flow() -> None:
         transport=queue.transport(),
     )
 
-    created = client.create_cloud_import_session(CloudImportSessionCreate(version=3, chunk_count=2))
-    assert created.session_id == "sess_1"
+    created = client.create_cloud_import_session(
+        CloudImportSessionCreate(
+            version=5,
+            chunk_count=2,
+            source_project_id="prj_a00000000000000000000000",
+        )
+    )
+    assert created.session_id == "imp_a00000000000000000000000"
     assert created.chunk_limits.max_keywords == 500
 
     first = client.upload_cloud_import_chunk(
-        "sess_1",
+        "imp_a00000000000000000000000",
         0,
-        {"checksum": CHUNK_CHECKSUM, "kind": "keywords", "keywords": [{"keyword": "seo"}]},
+        {
+            "checksum": CHUNK_CHECKSUM,
+            "kind": "keywords",
+            "keywords": cloud_import_package()["keywords"],
+        },
     )
     assert first.chunks_received == 1
 
     second = client.upload_cloud_import_chunk(
-        "sess_1",
+        "imp_a00000000000000000000000",
         1,
-        {"checksum": CHUNK_CHECKSUM, "kind": "sections", "sections": {"competitors": []}},
+        {"checksum": CHUNK_CHECKSUM, "kind": "sections", "sections": cloud_import_sections()},
         gzip=True,
     )
     assert second.chunks_received == 2
 
-    finalized = client.finalize_cloud_import_session("sess_1")
+    finalized = client.finalize_cloud_import_session("imp_a00000000000000000000000")
     assert finalized.state == "done"
     assert finalized.counts == {"keywords": 4}
 
     assert queue.requests[0].method == "POST"
     assert str(queue.requests[0].url) == "https://api.test/api/v1/cloud/import/sessions"
-    assert request_json(queue.requests[0]) == {"version": 3, "chunk_count": 2}
+    assert request_json(queue.requests[0]) == {
+        "version": 5,
+        "chunk_count": 2,
+        "source_project_id": "prj_a00000000000000000000000",
+    }
 
     assert queue.requests[1].method == "PUT"
     assert str(queue.requests[1].url) == (
-        "https://api.test/api/v1/cloud/import/sessions/sess_1/chunks/0"
+        "https://api.test/api/v1/cloud/import/sessions/imp_a00000000000000000000000/chunks/0"
     )
     assert "Content-Encoding" not in queue.requests[1].headers
+    assert request_json(queue.requests[1]) == {
+        "checksum": CHUNK_CHECKSUM,
+        "kind": "keywords",
+        "keywords": cloud_import_package()["keywords"],
+    }
 
     assert str(queue.requests[2].url) == (
-        "https://api.test/api/v1/cloud/import/sessions/sess_1/chunks/1"
+        "https://api.test/api/v1/cloud/import/sessions/imp_a00000000000000000000000/chunks/1"
     )
     assert queue.requests[2].headers["Content-Encoding"] == "gzip"
+    assert request_json(queue.requests[2]) == {
+        "checksum": CHUNK_CHECKSUM,
+        "kind": "sections",
+        "sections": cloud_import_sections(),
+    }
 
     assert queue.requests[3].method == "POST"
     assert str(queue.requests[3].url) == (
-        "https://api.test/api/v1/cloud/import/sessions/sess_1/finalize"
+        "https://api.test/api/v1/cloud/import/sessions/imp_a00000000000000000000000/finalize"
     )
     assert queue.requests[3].content in (b"", b"null")
