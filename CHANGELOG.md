@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+## 0.4.1 - 2026-07-30
+
+- Improved package metadata to describe the SDK's SEO rank-tracking, keyword, and ranking-history
+  capabilities.
+
 ## 0.4.0 - 2026-07-29
 
 - Adopt the strict public ID v3 registry and reject legacy or malformed opaque cursors.
