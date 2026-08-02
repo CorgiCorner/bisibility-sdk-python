@@ -30,6 +30,7 @@ from bisibility import (
     CostEstimateOptions,
     CreateKeywordInput,
     CreateKeywordsBatch,
+    CreateSavedKeywordsInput,
     CreateSavedViewInput,
     CreateSignalInput,
     CreateTeamInviteInput,
@@ -63,6 +64,7 @@ from bisibility import (
     RankHistoryExportOptions,
     RequestOptions,
     RunRankCheckInput,
+    SavedKeywordInput,
     SavedViewConfig,
     SavedViewFilters,
     SearchLocationsOptions,
@@ -524,6 +526,23 @@ def saved_view(**overrides: Any) -> dict[str, Any]:
     }
 
 
+def saved_keyword(**overrides: Any) -> dict[str, Any]:
+    return {
+        "cpc": 1.25,
+        "difficulty": 42,
+        "id": "svkw_a00000000000000000000000",
+        "intent": "commercial",
+        "location": "United States",
+        "saved_at": "2026-01-01T00:00:00.000Z",
+        "source_seed": "rank tracker",
+        "text": "rank tracker",
+        "trend": [{"month": 1, "search_volume": 1000, "year": 2026}],
+        "variant_count": 3,
+        "volume": 1200,
+        **overrides,
+    }
+
+
 def competitor(**overrides: Any) -> dict[str, Any]:
     return {
         "domain": "rankzly.io",
@@ -804,14 +823,9 @@ def test_discovery_methods_do_not_require_auth() -> None:
     }
     queue = QueueTransport(
         [
-            json_response(
-                {
-                    "checked_at": "2026-01-01T00:00:00.000Z",
-                    "providers": {"serp": ["dataforseo"]},
-                    "services": {"app": "ok", "database": "ok"},
-                    "status": "ok",
-                }
-            ),
+            json_response({"status": "ok"}),
+            json_response({"status": "ok"}),
+            json_response({"status": "ok"}),
             json_response({"info": {"title": "Bisibility"}, "openapi": "3.1.0", "paths": {}}),
             json_response({"data": [capability]}),
             text_response("# Bisibility API v1"),
@@ -820,17 +834,38 @@ def test_discovery_methods_do_not_require_auth() -> None:
     client = BisibilityClient(base_url="https://api.test/api/v1/", transport=queue.transport())
 
     assert client.get_health().status == "ok"
+    assert client.get_liveness().status == "ok"
+    assert client.get_readiness().status == "ok"
     assert client.get_open_api().openapi == "3.1.0"
     assert client.get_capabilities().data[0].name == "addKeywords"
     assert client.get_llms_text() == "# Bisibility API v1"
 
     assert [str(request.url) for request in queue.requests] == [
         "https://api.test/api/v1/health",
+        "https://api.test/api/v1/liveness",
+        "https://api.test/api/v1/readiness",
         "https://api.test/api/v1/openapi.json",
         "https://api.test/api/v1/capabilities",
         "https://api.test/api/v1/llms.txt",
     ]
     assert all("Authorization" not in request.headers for request in queue.requests)
+
+
+def test_returns_degraded_health_probes_on_503_without_retry(
+    recorded_sleeps: list[float],
+) -> None:
+    queue = QueueTransport(
+        [
+            json_response({"status": "degraded"}, 503),
+            json_response({"status": "degraded"}, 503),
+        ]
+    )
+    client = make_client(queue, max_retries=2)
+
+    assert client.get_health().status == "degraded"
+    assert client.get_readiness().status == "degraded"
+    assert len(queue.requests) == 2
+    assert recorded_sleeps == []
 
 
 def test_public_cost_methods_do_not_require_auth() -> None:
@@ -1308,8 +1343,8 @@ def test_sends_bearer_auth_and_default_headers_on_protected_requests() -> None:
     assert request.headers["Authorization"] == f"Bearer {API_KEY}"
     assert request.headers["X-Client"] == "sdk-test"
     assert request.headers["X-Request"] == "request"
-    assert request.headers["User-Agent"] == "bisibility-sdk-python/0.4.1"
-    assert request.headers["X-Bisibility-Client"] == "bisibility-sdk-python/0.4.1"
+    assert request.headers["User-Agent"] == "bisibility-sdk-python/0.5.0"
+    assert request.headers["X-Bisibility-Client"] == "bisibility-sdk-python/0.5.0"
     assert request.extensions["timeout"] == {
         "connect": 30.0,
         "read": 30.0,
@@ -1326,7 +1361,7 @@ def test_preserves_user_agent_and_allows_disabling_timeout() -> None:
 
     request = queue.requests[-1]
     assert request.headers["User-Agent"] == "my-app/1.0"
-    assert request.headers["X-Bisibility-Client"] == "bisibility-sdk-python/0.4.1"
+    assert request.headers["X-Bisibility-Client"] == "bisibility-sdk-python/0.5.0"
     assert request.extensions["timeout"] == {
         "connect": None,
         "read": None,
@@ -1448,6 +1483,15 @@ def test_preserves_user_agent_and_allows_disabling_timeout() -> None:
             ),
             {"limit": 1},
             ["viw_a00000000000000000000000", "viw_b00000000000000000000000"],
+        ),
+        (
+            "iter_saved_keywords",
+            ("prj_a00000000000000000000000",),
+            lambda page: saved_keyword(
+                id="svkw_a00000000000000000000000" if page == 1 else "svkw_b00000000000000000000000"
+            ),
+            {"limit": 1},
+            ["svkw_a00000000000000000000000", "svkw_b00000000000000000000000"],
         ),
         (
             "iter_competitors",
@@ -3559,6 +3603,97 @@ def test_saved_view_methods() -> None:
     )
 
 
+def test_saved_keyword_methods() -> None:
+    queue = QueueTransport(
+        [
+            json_response(list_response([saved_keyword()], "eyJ2IjozLCJvIjoyfQ")),
+            json_response(
+                {
+                    "duplicate_count": 1,
+                    "results": [
+                        {"keyword": "rank tracker", "status": "created"},
+                        {"keyword": "seo tool", "status": "skipped"},
+                    ],
+                    "saved_count": 1,
+                },
+                201,
+            ),
+            json_response({"removed_count": 1}),
+        ]
+    )
+    client = make_client(queue)
+    input_model = CreateSavedKeywordsInput(
+        keywords=[
+            "seo tool",
+            SavedKeywordInput(
+                cpc_cents=125,
+                difficulty=42,
+                intent="commercial",
+                keyword="rank tracker",
+                location="United States",
+                search_volume=1200,
+                source_seed="seo",
+                variant_count=3,
+            ),
+        ]
+    )
+
+    saved = client.list_saved_keywords(
+        "prj_a00000000000000000000000", {"cursor": "eyJ2IjozLCJvIjoxfQ"}
+    )
+    assert saved.meta.next_cursor == "eyJ2IjozLCJvIjoyfQ"
+    assert saved.data[0].id == "svkw_a00000000000000000000000"
+    assert saved.data[0].text == "rank tracker"
+    assert saved.data[0].cpc == 1.25
+    assert saved.data[0].trend[0].search_volume == 1000
+    assert saved.data[0].variant_count == 3
+
+    created = client.create_saved_keywords("prj_a00000000000000000000000", input_model)
+    assert created.saved_count == 1
+    assert created.duplicate_count == 1
+    assert created.results[1].status == "skipped"
+
+    assert (
+        client.delete_saved_keyword(
+            "prj_a00000000000000000000000", "svkw_a00000000000000000000000"
+        ).removed_count
+        == 1
+    )
+
+    assert str(queue.requests[0].url) == (
+        "https://api.test/api/v1/projects/prj_a00000000000000000000000/saved-keywords?cursor=eyJ2IjozLCJvIjoxfQ"
+    )
+    assert request_json(queue.requests[1]) == {
+        "keywords": [
+            "seo tool",
+            {
+                "cpc_cents": 125,
+                "difficulty": 42,
+                "intent": "commercial",
+                "keyword": "rank tracker",
+                "location": "United States",
+                "search_volume": 1200,
+                "source_seed": "seo",
+                "variant_count": 3,
+            },
+        ]
+    }
+    assert str(queue.requests[2].url) == (
+        "https://api.test/api/v1/projects/prj_a00000000000000000000000/saved-keywords/svkw_a00000000000000000000000"
+    )
+
+
+@pytest.mark.parametrize(
+    "saved_keyword_id",
+    ["skw_a00000000000000000000000", "svkw_A00000000000000000000000", "svkw_short"],
+)
+def test_delete_saved_keyword_rejects_invalid_public_ids(saved_keyword_id: str) -> None:
+    client = make_client(QueueTransport([]))
+
+    with pytest.raises(ValueError, match="must be a strict public svkw_ identifier"):
+        client.delete_saved_keyword("prj_a00000000000000000000000", saved_keyword_id)
+
+
 def test_competitor_methods_include_list_meta() -> None:
     queue = QueueTransport(
         [
@@ -3723,6 +3858,10 @@ def test_migration_token_methods() -> None:
         (
             lambda client: client.list_saved_views("prj_a00000000000000000000000"),
             "https://api.test/api/v1/projects/prj_a00000000000000000000000/saved-views",
+        ),
+        (
+            lambda client: client.list_saved_keywords("prj_a00000000000000000000000"),
+            "https://api.test/api/v1/projects/prj_a00000000000000000000000/saved-keywords",
         ),
         (
             lambda client: client.list_competitors("prj_a00000000000000000000000"),

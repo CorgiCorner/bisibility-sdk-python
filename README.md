@@ -84,6 +84,32 @@ minting, and webhook CRUD.
 
 Legacy `bsk_...` and `bsp_...` credentials are not accepted by the v3 contract.
 
+### Async client
+
+`AsyncBisibilityClient` exposes the same API operations as `BisibilityClient`
+through `httpx.AsyncClient`. Use `async with` to close an owned HTTP client, or
+call `await client.aclose()` explicitly:
+
+```python
+import os
+
+from bisibility import AsyncBisibilityClient
+
+
+async def list_all_keywords(project_id: str) -> None:
+    async with AsyncBisibilityClient(
+        api_key=os.environ["BISIBILITY_API_KEY"],
+        project_id=os.environ.get("BISIBILITY_PROJECT_ID"),
+    ) as bisibility:
+        async for keyword in bisibility.iter_keywords(project_id, {"limit": 100}):
+            print(keyword.text)
+```
+
+`create_async_bisibility_client()` is the factory counterpart to
+`create_bisibility_client()`. Async requests preserve the same authentication,
+timeouts, retries, validation, errors, and cursor filters as the synchronous
+client. Retry delays are cancellable and do not block the event loop.
+
 ### Public IDs and cursors v3
 
 Every resource identifier at the HTTP boundary is a strict lowercase public ID:
@@ -141,7 +167,8 @@ bisibility.create_api_key(
 
 ## Methods
 
-- Discovery: `get_health`, `get_open_api`, `get_capabilities`, `get_llms_text`
+- Discovery: `get_health`, `get_liveness`, `get_readiness`, `get_open_api`, `get_capabilities`,
+  `get_llms_text`
 - Public cost (no auth): `get_provider_rates`, `get_cost_estimate`
 - Projects: `list_projects`, `get_project`, `update_project`, `delete_project`,
   `update_project_defaults`
@@ -168,6 +195,9 @@ bisibility.create_api_key(
   `set_primary_provider`, `disconnect_provider`
 - Saved views: `list_saved_views`, `create_saved_view`, `delete_project_saved_view`,
   `delete_saved_view`
+- Saved keywords: `list_saved_keywords`, `create_saved_keywords`, `delete_saved_keyword`.
+  `create_saved_keywords` accepts plain strings or `SavedKeywordInput` items and returns
+  `saved_count`, `duplicate_count`, and a per-keyword `results` list
 - Competitors: `list_competitors`, `add_competitor`, `remove_project_competitor`,
   `remove_competitor`
 - Notification preferences: `get_notification_preferences`, `update_notification_preferences`
@@ -232,7 +262,9 @@ for keyword in bisibility.iter_keywords(
 
 Iterators are available for keywords, rank checks, signals, API keys (including
 project API keys), webhooks, alert rules, triggered alerts, team members, team
-invites, providers, saved views, competitors, and migration tokens.
+invites, providers, saved views, saved keywords, competitors, and migration
+tokens.
+The async client exposes the same `iter_*` names as async iterators.
 
 ### Webhook secret rotation
 

@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+## 0.5.0 - 2026-08-02
+
+- **Breaking for typed consumers:** `get_health`, `get_liveness`, and `get_readiness` now return
+  status-only responses; degraded health and readiness HTTP 503 responses return normally without
+  retries, while other endpoints retain 503 retries.
+- Added `AsyncBisibilityClient`, `create_async_bisibility_client`, async context manager support,
+  and async iterator parity with the synchronous client.
+- Added `list_saved_keywords`, `iter_saved_keywords`, `create_saved_keywords`, and
+  `delete_saved_keyword` with `svkw` public IDs.
+
 ## 0.4.1 - 2026-07-30
 
 - Improved package metadata to describe the SDK's SEO rank-tracking, keyword, and ranking-history
@@ -41,3 +51,4 @@
 ## 0.1.0 - 2026-07-24
 
 - Initial release.
+- Changed the default request timeout from 10 seconds to 30 seconds.

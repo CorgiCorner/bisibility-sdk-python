@@ -57,6 +57,8 @@ from .models import (
     CreateKeywordsInput,
     CreateKeywordsResponse,
     CreateProjectInput,
+    CreateSavedKeywordsInput,
+    CreateSavedKeywordsResponse,
     CreateSavedViewInput,
     CreateSignalInput,
     CreateTeamInviteInput,
@@ -81,6 +83,7 @@ from .models import (
     ListSearchPerformanceQueryStatsOptions,
     ListSignalsOptions,
     ListTrafficSnapshotsOptions,
+    LivenessResponse,
     LoadMoreBacklinkRowsOptions,
     LocationSuggestion,
     Me,
@@ -111,8 +114,11 @@ from .models import (
     RankHistoryExportOptions,
     RankHistoryExportResponse,
     RankHistoryExportRow,
+    ReadinessResponse,
     RevokedTeamInvite,
     RunRankCheckInput,
+    SavedKeyword,
+    SavedKeywordDeleteResult,
     SavedView,
     SavedViewDeleteResult,
     SearchLocationsOptions,
@@ -156,7 +162,7 @@ _MISSING = object()
 try:
     SDK_VERSION = version("bisibility")
 except PackageNotFoundError:  # pragma: no cover - source tree without installed metadata
-    SDK_VERSION = "0.4.1"
+    SDK_VERSION = "0.5.0"
 CLIENT_ID = f"bisibility-sdk-python/{SDK_VERSION}"
 AUTH_TOKEN_PREFIXES = ("bsb_key_live_", "bsb_key_test_", "bsb_pat_live_", "mig_")
 
@@ -403,7 +409,27 @@ class BisibilityClient:
         return self._request(
             "GET",
             "/health",
+            accepted_status_codes=frozenset({503}),
             response_model=HealthResponse,
+            auth=False,
+            request_options=request_options,
+        )
+
+    def get_liveness(self, request_options: RequestOptionsLike = None) -> LivenessResponse:
+        return self._request(
+            "GET",
+            "/liveness",
+            response_model=LivenessResponse,
+            auth=False,
+            request_options=request_options,
+        )
+
+    def get_readiness(self, request_options: RequestOptionsLike = None) -> ReadinessResponse:
+        return self._request(
+            "GET",
+            "/readiness",
+            accepted_status_codes=frozenset({503}),
+            response_model=ReadinessResponse,
             auth=False,
             request_options=request_options,
         )
@@ -1686,6 +1712,51 @@ class BisibilityClient:
             request_options=request_options,
         )
 
+    def list_saved_keywords(
+        self,
+        project_id: str,
+        options: PaginationOptions | Mapping[str, Any] | None = None,
+        request_options: RequestOptionsLike = None,
+    ) -> ListResponse[SavedKeyword]:
+        pagination = _dump_options(options, PaginationOptions)
+        return self._request(
+            "GET",
+            f"/projects/{_encoded_path_segment(project_id, 'prj')}/saved-keywords",
+            query={"cursor": pagination.get("cursor"), "limit": pagination.get("limit")},
+            response_model=ListResponse[SavedKeyword],
+            request_options=request_options,
+        )
+
+    def create_saved_keywords(
+        self,
+        project_id: str,
+        input: CreateSavedKeywordsInput | Mapping[str, Any],
+        request_options: RequestOptionsLike = None,
+    ) -> CreateSavedKeywordsResponse:
+        return self._request(
+            "POST",
+            f"/projects/{_encoded_path_segment(project_id, 'prj')}/saved-keywords",
+            body=input,
+            response_model=CreateSavedKeywordsResponse,
+            request_options=request_options,
+        )
+
+    def delete_saved_keyword(
+        self,
+        project_id: str,
+        saved_keyword_id: str,
+        request_options: RequestOptionsLike = None,
+    ) -> SavedKeywordDeleteResult:
+        return self._request(
+            "DELETE",
+            (
+                f"/projects/{_encoded_path_segment(project_id, 'prj')}/saved-keywords/"
+                f"{_encoded_path_segment(saved_keyword_id, 'svkw')}"
+            ),
+            response_model=SavedKeywordDeleteResult,
+            request_options=request_options,
+        )
+
     def list_competitors(
         self,
         project_id: str,
@@ -2116,6 +2187,17 @@ class BisibilityClient:
             self._iter_project_list(project_id, self.list_saved_views, options, request_options),
         )
 
+    def iter_saved_keywords(
+        self,
+        project_id: str,
+        options: PaginationOptions | Mapping[str, Any] | None = None,
+        request_options: RequestOptionsLike = None,
+    ) -> Iterator[SavedKeyword]:
+        return cast(
+            Iterator[SavedKeyword],
+            self._iter_project_list(project_id, self.list_saved_keywords, options, request_options),
+        )
+
     def iter_competitors(
         self,
         project_id: str,
@@ -2174,6 +2256,7 @@ class BisibilityClient:
         method: str,
         path: str,
         *,
+        accepted_status_codes: frozenset[int] = frozenset(),
         auth: bool = True,
         body: object = _MISSING,
         parse_as: Literal["text"] | None = None,
@@ -2215,9 +2298,16 @@ class BisibilityClient:
         if body is not _MISSING:
             request_kwargs["json"] = _dump_jsonable(body)
 
-        response = self._send_with_retries(method, url, request_kwargs)
+        response = self._send_with_retries(
+            method,
+            url,
+            request_kwargs,
+            accepted_status_codes=accepted_status_codes,
+        )
 
-        if response.status_code < 200 or response.status_code >= 300:
+        if (
+            response.status_code < 200 or response.status_code >= 300
+        ) and response.status_code not in accepted_status_codes:
             raise self._error_from_response(response, method, url)
 
         if parse_as == "text":
@@ -2230,6 +2320,8 @@ class BisibilityClient:
         method: str,
         url: str,
         request_kwargs: dict[str, Any],
+        *,
+        accepted_status_codes: frozenset[int] = frozenset(),
     ) -> httpx.Response:
         headers: Mapping[str, str] = request_kwargs.get("headers") or {}
         retryable = method.upper() in IDEMPOTENT_METHODS or any(
@@ -2250,7 +2342,11 @@ class BisibilityClient:
                     url=url,
                 ) from exc
 
-            if response.status_code in RETRYABLE_STATUS_CODES and retries_left:
+            if (
+                response.status_code in RETRYABLE_STATUS_CODES
+                and response.status_code not in accepted_status_codes
+                and retries_left
+            ):
                 retry_after = _retry_after_seconds(response.headers)
                 response.close()
                 _sleep(retry_after if retry_after is not None else _backoff_seconds(attempt))

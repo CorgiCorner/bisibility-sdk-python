@@ -31,6 +31,7 @@ from .public_ids import (
     MemberId,
     PersonalAccessTokenId,
     ProjectId,
+    SavedKeywordId,
     SignalId,
     TagId,
     TransferTokenId,
@@ -1121,6 +1122,59 @@ class SavedViewDeleteResult(BisibilityModel):
     deleted: bool
 
 
+class SavedKeywordTrendPoint(BisibilityModel):
+    month: int
+    search_volume: int | None = None
+    year: int
+
+
+class SavedKeyword(BisibilityModel):
+    cpc: float | None = None
+    difficulty: int | None = None
+    id: SavedKeywordId
+    intent: str | None = None
+    location: str
+    saved_at: str
+    source_seed: str | None = None
+    text: str
+    trend: list[SavedKeywordTrendPoint]
+    variant_count: int
+    volume: int | None = None
+
+
+class SavedKeywordInput(BisibilityModel):
+    cpc_cents: int | None = None
+    difficulty: int | None = None
+    intent: str | None = None
+    keyword: str
+    location: str | None = None
+    search_volume: int | None = None
+    source_seed: str | None = None
+    variant_count: int | None = None
+
+
+SavedKeywordItem: TypeAlias = str | SavedKeywordInput | Mapping[str, Any]
+
+
+class CreateSavedKeywordsInput(BisibilityModel):
+    keywords: list[SavedKeywordItem]
+
+
+class CreateSavedKeywordResult(BisibilityModel):
+    keyword: str
+    status: Literal["created", "skipped"]
+
+
+class CreateSavedKeywordsResponse(BisibilityModel):
+    duplicate_count: int
+    results: list[CreateSavedKeywordResult]
+    saved_count: int
+
+
+class SavedKeywordDeleteResult(BisibilityModel):
+    removed_count: int
+
+
 class AddCompetitorInput(BisibilityModel):
     domain: str
     label: str | None = None
@@ -1550,10 +1604,26 @@ class HealthProviders(BisibilityModel):
 
 
 class HealthResponse(BisibilityModel):
-    checked_at: str
-    providers: HealthProviders
-    services: HealthServices
-    status: str
+    status: Literal["degraded", "ok"]
+
+
+class LivenessServices(BisibilityModel):
+    app: Literal["ok"]
+    appRelease: str
+    appRevision: str
+
+
+class LivenessResponse(BisibilityModel):
+    status: Literal["ok"]
+
+
+class ReadinessServices(LivenessServices):
+    database: Literal["degraded", "ok"]
+    migrations: Literal["incomplete", "ready", "unknown"]
+
+
+class ReadinessResponse(BisibilityModel):
+    status: Literal["degraded", "ok"]
 
 
 class ProviderRateOption(BisibilityModel):
