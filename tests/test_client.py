@@ -1039,12 +1039,10 @@ def test_rejects_malformed_public_path_ids_before_http(project_id: str) -> None:
 def test_rejects_malformed_project_header_before_http() -> None:
     queue = QueueTransport([])
     client = make_client(queue, project_id="prj_a00000000000000000000000")
+    request_options = RequestOptions(headers={"X-Bisibility-Project": "raw-project-id"})
 
     with pytest.raises(ValueError, match="strict public prj_"):
-        client.get_keyword(
-            "kw_a00000000000000000000000",
-            RequestOptions(headers={"X-Bisibility-Project": "raw-project-id"}),
-        )
+        client.get_keyword("kw_a00000000000000000000000", request_options)
 
     assert queue.requests == []
 
@@ -1326,8 +1324,10 @@ def test_project_defaults_and_keyword_schedule_models_match_openapi_field_sets()
 
 
 def test_project_defaults_rejects_unknown_source() -> None:
+    invalid_defaults = project_defaults(source="guessed")
+
     with pytest.raises(ValidationError):
-        ProjectDefaults.model_validate(project_defaults(source="guessed"))
+        ProjectDefaults.model_validate(invalid_defaults)
 
 
 def test_sends_bearer_auth_and_default_headers_on_protected_requests() -> None:
@@ -1343,8 +1343,8 @@ def test_sends_bearer_auth_and_default_headers_on_protected_requests() -> None:
     assert request.headers["Authorization"] == f"Bearer {API_KEY}"
     assert request.headers["X-Client"] == "sdk-test"
     assert request.headers["X-Request"] == "request"
-    assert request.headers["User-Agent"] == "bisibility-sdk-python/0.5.0"
-    assert request.headers["X-Bisibility-Client"] == "bisibility-sdk-python/0.5.0"
+    assert request.headers["User-Agent"] == "bisibility-sdk-python/0.5.1"
+    assert request.headers["X-Bisibility-Client"] == "bisibility-sdk-python/0.5.1"
     assert request.extensions["timeout"] == {
         "connect": 30.0,
         "read": 30.0,
@@ -1361,7 +1361,7 @@ def test_preserves_user_agent_and_allows_disabling_timeout() -> None:
 
     request = queue.requests[-1]
     assert request.headers["User-Agent"] == "my-app/1.0"
-    assert request.headers["X-Bisibility-Client"] == "bisibility-sdk-python/0.5.0"
+    assert request.headers["X-Bisibility-Client"] == "bisibility-sdk-python/0.5.1"
     assert request.extensions["timeout"] == {
         "connect": None,
         "read": None,

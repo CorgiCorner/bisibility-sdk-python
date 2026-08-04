@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+## 0.5.1 - 2026-08-04
+
+- No client API or runtime behavior changes. This maintenance release updates public package
+  validation and preserves the 0.5.0 client surface.
+
 ## 0.5.0 - 2026-08-02
 
 - **Breaking for typed consumers:** `get_health`, `get_liveness`, and `get_readiness` now return

@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "bisibility"
-version = "0.5.0"
+version = "0.5.1"
 description = "Python client for the Bisibility API - SEO rank tracking, keywords, and ranking history."
 readme = "README.md"
 requires-python = ">=3.10"

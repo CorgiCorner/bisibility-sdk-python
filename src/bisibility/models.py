@@ -146,47 +146,60 @@ SitemapMonitorStatus: TypeAlias = Literal["active", "disabled", "pending"]
 
 T = TypeVar("T")
 
+_CURSOR_V3_ERROR_MESSAGE = "cursor must be an opaque v3 cursor"
+
+
+def _validate_offset_cursor_v3(payload: JsonObject) -> None:
+    offset = payload["o"]
+    if type(offset) is not int or offset < 0:
+        raise ValueError(_CURSOR_V3_ERROR_MESSAGE)
+
+
+def _validate_keyset_cursor_v3(payload: JsonObject) -> None:
+    public_id = payload["public_id"]
+    timestamp = payload["t"]
+    if not isinstance(public_id, str) or not isinstance(timestamp, str):
+        raise ValueError(_CURSOR_V3_ERROR_MESSAGE)
+    prefix, separator, suffix = public_id.partition("_")
+    if (
+        separator != "_"
+        or prefix not in PUBLIC_ID_PREFIXES
+        or re.fullmatch(PUBLIC_ID_SUFFIX_PATTERN, suffix) is None
+        or "T" not in timestamp
+        or not timestamp.endswith("Z")
+    ):
+        raise ValueError(_CURSOR_V3_ERROR_MESSAGE)
+    try:
+        datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
+    except ValueError as error:
+        raise ValueError(_CURSOR_V3_ERROR_MESSAGE) from error
+
+
+def _validate_cursor_payload_v3(payload: JsonObject) -> None:
+    if set(payload) == {"v", "o"}:
+        _validate_offset_cursor_v3(payload)
+        return
+    if set(payload) == {"v", "public_id", "t"}:
+        _validate_keyset_cursor_v3(payload)
+        return
+    raise ValueError(_CURSOR_V3_ERROR_MESSAGE)
+
 
 def _validate_cursor_v3(value: str) -> str:
     if not isinstance(value, str) or not value or len(value) > 2048:
-        raise ValueError("cursor must be an opaque v3 cursor")
+        raise ValueError(_CURSOR_V3_ERROR_MESSAGE)
     try:
         padding = "=" * (-len(value) % 4)
         decoded = base64.b64decode(value + padding, altchars=b"-_", validate=True)
         payload = json.loads(decoded)
-    except (ValueError, UnicodeDecodeError, json.JSONDecodeError) as error:
-        raise ValueError("cursor must be an opaque v3 cursor") from error
+    except ValueError as error:
+        raise ValueError(_CURSOR_V3_ERROR_MESSAGE) from error
 
     if not isinstance(payload, dict) or type(payload.get("v")) is not int or payload["v"] != 3:
-        raise ValueError("cursor must be an opaque v3 cursor")
+        raise ValueError(_CURSOR_V3_ERROR_MESSAGE)
 
-    if set(payload) == {"v", "o"}:
-        offset = payload["o"]
-        if type(offset) is not int or offset < 0:
-            raise ValueError("cursor must be an opaque v3 cursor")
-        return value
-
-    if set(payload) == {"v", "public_id", "t"}:
-        public_id = payload["public_id"]
-        timestamp = payload["t"]
-        if not isinstance(public_id, str) or not isinstance(timestamp, str):
-            raise ValueError("cursor must be an opaque v3 cursor")
-        prefix, separator, suffix = public_id.partition("_")
-        if (
-            separator != "_"
-            or prefix not in PUBLIC_ID_PREFIXES
-            or re.fullmatch(PUBLIC_ID_SUFFIX_PATTERN, suffix) is None
-            or "T" not in timestamp
-            or not timestamp.endswith("Z")
-        ):
-            raise ValueError("cursor must be an opaque v3 cursor")
-        try:
-            datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
-        except ValueError as error:
-            raise ValueError("cursor must be an opaque v3 cursor") from error
-        return value
-
-    raise ValueError("cursor must be an opaque v3 cursor")
+    _validate_cursor_payload_v3(payload)
+    return value
 
 
 CursorV3: TypeAlias = Annotated[str, AfterValidator(_validate_cursor_v3)]

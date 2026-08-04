@@ -20,3 +20,6 @@ dist/
 !.env.example
 
 .DS_Store
+
+# Graphify knowledge graph - generated, machine-local (regenerate: graphify update .)
+graphify-out/
