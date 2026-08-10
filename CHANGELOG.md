@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## 0.6.0 - 2026-08-10
+
+- `connect_provider` now applies requested priority with a follow-up settings update. Deprecated
+  `primary=True` still selects priority `0`; `primary=False` remains a no-op. If the follow-up
+  update fails, `BisibilityProviderPrioritySyncError` exposes the connected provider for recovery.
+
 ## 0.5.1 - 2026-08-04
 
 - No client API or runtime behavior changes. This maintenance release updates public package

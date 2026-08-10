@@ -5,6 +5,7 @@ from .errors import (
     BisibilityConfigurationError,
     BisibilityError,
     BisibilityNetworkError,
+    BisibilityProviderPrioritySyncError,
     BisibilityResponseError,
 )
 from .models import (
@@ -261,6 +262,7 @@ __all__ = [
     "BisibilityConfigurationError",
     "BisibilityError",
     "BisibilityNetworkError",
+    "BisibilityProviderPrioritySyncError",
     "BisibilityResponseError",
     "Capability",
     "CloudImportAlertConditionType",

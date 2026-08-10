@@ -25,7 +25,9 @@ from pydantic import BaseModel, ValidationError
 from .errors import (
     BisibilityApiError,
     BisibilityConfigurationError,
+    BisibilityError,
     BisibilityNetworkError,
+    BisibilityProviderPrioritySyncError,
     BisibilityResponseError,
 )
 from .models import (
@@ -162,7 +164,7 @@ _MISSING = object()
 try:
     SDK_VERSION = version("bisibility")
 except PackageNotFoundError:  # pragma: no cover - source tree without installed metadata
-    SDK_VERSION = "0.5.0"
+    SDK_VERSION = "0.6.0"
 CLIENT_ID = f"bisibility-sdk-python/{SDK_VERSION}"
 AUTH_TOKEN_PREFIXES = ("bsb_key_live_", "bsb_key_test_", "bsb_pat_live_", "mig_")
 
@@ -230,6 +232,31 @@ def _dump_jsonable(value: Any) -> Any:
     if isinstance(value, list | tuple):
         return [_dump_jsonable(item) for item in value]
     return value
+
+
+def _provider_connect_body(
+    value: ConnectProviderInput | Mapping[str, Any] | None,
+) -> tuple[object, int | None]:
+    if value is None:
+        return _MISSING, None
+    body = _dump_jsonable(value)
+    if not isinstance(body, dict):  # pragma: no cover - constrained by the public signature
+        return body, None
+    primary = body.pop("primary", None)
+    priority = body.pop("priority", None)
+    if primary is True:
+        return body, 0
+    return body, priority
+
+
+def _provider_settings_body(value: ProviderSettingsInput | Mapping[str, Any]) -> object:
+    body = _dump_jsonable(value)
+    if not isinstance(body, dict):  # pragma: no cover - constrained by the public signature
+        return body
+    primary = body.pop("primary", None)
+    if primary is True:
+        body["priority"] = 0
+    return body
 
 
 def _dump_options(
@@ -1550,16 +1577,31 @@ class BisibilityClient:
         input: ConnectProviderInput | Mapping[str, Any] | None = None,
         request_options: RequestOptionsLike = None,
     ) -> ProviderConnection:
-        return self._request(
+        path = (
+            f"/projects/{_encoded_path_segment(project_id, 'prj')}/providers/"
+            f"{_encoded_natural_path_segment(provider_id)}/connect"
+        )
+        body, requested_priority = _provider_connect_body(input)
+        connection = self._request(
             "POST",
-            (
-                f"/projects/{_encoded_path_segment(project_id, 'prj')}/providers/"
-                f"{_encoded_natural_path_segment(provider_id)}/connect"
-            ),
-            body=input if input is not None else _MISSING,
+            path,
+            body=body,
             response_model=ProviderConnection,
             request_options=request_options,
         )
+        if requested_priority is None:
+            return connection
+        try:
+            return self._request(
+                "PATCH",
+                path.removesuffix("/connect"),
+                body={"priority": requested_priority},
+                response_model=ProviderConnection,
+                request_options=request_options,
+                suppress_idempotency_key=True,
+            )
+        except BisibilityError as exc:
+            raise BisibilityProviderPrioritySyncError(connection, exc) from exc
 
     def test_provider_connection(
         self,
@@ -1592,7 +1634,7 @@ class BisibilityClient:
                 f"/projects/{_encoded_path_segment(project_id, 'prj')}/providers/"
                 f"{_encoded_natural_path_segment(provider_id)}"
             ),
-            body=input,
+            body=_provider_settings_body(input),
             response_model=ProviderConnection,
             request_options=request_options,
         )
@@ -1632,6 +1674,7 @@ class BisibilityClient:
         primary: bool = True,
         request_options: RequestOptionsLike = None,
     ) -> ProviderConnection:
+        """Deprecated: use ``set_provider_priority``; true maps to priority zero."""
         return self.update_provider_settings(
             project_id,
             provider_id,
@@ -2263,6 +2306,7 @@ class BisibilityClient:
         query: QueryParams | None = None,
         request_options: RequestOptionsLike = None,
         response_model: type[T] | None = None,
+        suppress_idempotency_key: bool = False,
     ) -> T:
         options = _coerce_request_options(request_options)
         url = self._build_url(path, query)
@@ -2276,6 +2320,8 @@ class BisibilityClient:
             headers[PROJECT_HEADER] = self.project_id
         if options.headers:
             headers.update(options.headers)
+        if suppress_idempotency_key:
+            headers.pop(IDEMPOTENCY_KEY_HEADER, None)
         if PROJECT_HEADER in headers:
             headers[PROJECT_HEADER] = require_public_id(
                 headers[PROJECT_HEADER],
@@ -2286,7 +2332,7 @@ class BisibilityClient:
             headers["Authorization"] = f"Bearer {self.api_key}"
         else:
             headers.pop("Authorization", None)
-        if options.idempotency_key:
+        if options.idempotency_key and not suppress_idempotency_key:
             headers["Idempotency-Key"] = options.idempotency_key
         if "User-Agent" not in headers:
             headers["User-Agent"] = CLIENT_ID

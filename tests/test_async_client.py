@@ -14,6 +14,9 @@ from bisibility import (
     BisibilityClient,
     BisibilityNetworkError,
     BisibilityResponseError,
+    ConnectProviderInput,
+    ProviderCredentialsInput,
+    RequestOptions,
     create_async_bisibility_client,
 )
 
@@ -49,6 +52,20 @@ def keyword(keyword_id: str) -> dict[str, Any]:
         "text": "rank tracker api",
         "topic": None,
         "updated_at": "2026-01-02T00:00:00.000Z",
+    }
+
+
+def provider_connection(**overrides: Any) -> dict[str, Any]:
+    return {
+        "enabled": True,
+        "id": "conn_a00000000000000000000000",
+        "is_primary": False,
+        "kind": "serp",
+        "priority": 100,
+        "project_id": "prj_a00000000000000000000000",
+        "provider": "serpapi",
+        "status": "connected",
+        **overrides,
     }
 
 
@@ -105,6 +122,48 @@ def test_async_factory_request_headers_timeout_and_owned_lifecycle() -> None:
         "read": 30.0,
         "write": 30.0,
     }
+
+
+def test_async_connect_provider_applies_priority_in_two_steps() -> None:
+    requests: list[httpx.Request] = []
+    responses = iter(
+        [
+            httpx.Response(201, json=provider_connection()),
+            httpx.Response(200, json=provider_connection(is_primary=True, priority=0)),
+        ]
+    )
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return next(responses)
+
+    async def scenario() -> None:
+        async with AsyncBisibilityClient(
+            api_key=API_KEY,
+            base_url="https://api.example.com/api/v1",
+            transport=httpx.MockTransport(handler),
+        ) as client:
+            connection = await client.connect_provider(
+                "prj_a00000000000000000000000",
+                "serpapi",
+                ConnectProviderInput(
+                    credentials=ProviderCredentialsInput(api_key="secret"),
+                    primary=True,
+                    priority=7,
+                ),
+                RequestOptions(idempotency_key="connect-once"),
+            )
+            assert connection.priority == 0
+
+    asyncio.run(scenario())
+    assert httpx.Response(200, request=requests[0], content=requests[0].content).json() == {
+        "credentials": {"api_key": "secret"}
+    }
+    assert httpx.Response(200, request=requests[1], content=requests[1].content).json() == {
+        "priority": 0
+    }
+    assert requests[0].headers["Idempotency-Key"] == "connect-once"
+    assert "Idempotency-Key" not in requests[1].headers
 
 
 def test_async_iterator_preserves_filters_across_cursor_pages() -> None:

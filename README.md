@@ -8,7 +8,7 @@
 > [API reference](https://bisibility.com/docs/api/overview) ·
 > [Roadmap](https://bisibility.com/roadmap)
 >
-> **Status:** Published on PyPI as v0.4.0.
+> **Status:** Published on PyPI as v0.6.0.
 
 Python SDK for the Bisibility REST API.
 
@@ -192,7 +192,7 @@ bisibility.create_api_key(
   `revoke_project_team_invite`, `revoke_team_invite`
 - Providers: `list_providers`, `connect_provider`, `test_provider_connection`,
   `update_provider_settings`, `set_provider_enabled`, `set_provider_priority`,
-  `set_primary_provider`, `disconnect_provider`
+  `set_primary_provider` (deprecated; use `set_provider_priority`), `disconnect_provider`
 - Saved views: `list_saved_views`, `create_saved_view`, `delete_project_saved_view`,
   `delete_saved_view`
 - Saved keywords: `list_saved_keywords`, `create_saved_keywords`, `delete_saved_keyword`.
@@ -414,10 +414,12 @@ provider = bisibility.connect_provider(
     "serpapi",
     ConnectProviderInput(
         credentials=ProviderCredentialsInput(api_key="serpapi-secret"),
-        primary=True,
+        priority=0,
     ),
 )
 
+# `connect_provider` applies `priority` after connecting. Legacy `primary=True` maps to zero;
+# `primary=False` is a no-op. Failures expose `.connection` in `BisibilityProviderPrioritySyncError`.
 # Self-hosted analytics providers (e.g. "plausible") accept an optional
 # endpoint credential pointing at the instance API.
 analytics = bisibility.connect_provider(

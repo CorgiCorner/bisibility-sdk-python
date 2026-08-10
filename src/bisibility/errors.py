@@ -6,7 +6,7 @@ from typing import Any
 
 import httpx
 
-from .models import ProblemDetails
+from .models import ProblemDetails, ProviderConnection
 
 _SENSITIVE_HEADERS = {
     "authorization",
@@ -20,6 +20,18 @@ _SENSITIVE_HEADERS = {
 
 class BisibilityError(Exception):
     """Common base for every SDK-defined error."""
+
+
+class BisibilityProviderPrioritySyncError(BisibilityError):
+    """A provider connected successfully but its requested priority did not apply."""
+
+    connection: ProviderConnection
+    cause: BisibilityError
+
+    def __init__(self, connection: ProviderConnection, cause: BisibilityError) -> None:
+        super().__init__("Provider connected, but the priority update failed.")
+        self.connection = connection
+        self.cause = cause
 
 
 class BisibilityApiError(BisibilityError):

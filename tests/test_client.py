@@ -21,6 +21,7 @@ from bisibility import (
     BisibilityConfigurationError,
     BisibilityError,
     BisibilityNetworkError,
+    BisibilityProviderPrioritySyncError,
     BisibilityResponseError,
     CloudImportFinalizeResponse,
     CloudImportPackage,
@@ -987,7 +988,7 @@ def test_searches_canonical_locations() -> None:
     )
 
 
-def test_public_id_v3_registry_and_shape_are_fixed() -> None:
+def test_public_id_registry_and_shape_are_fixed() -> None:
     assert PUBLIC_ID_PREFIXES == {
         "al",
         "alr",
@@ -1343,8 +1344,8 @@ def test_sends_bearer_auth_and_default_headers_on_protected_requests() -> None:
     assert request.headers["Authorization"] == f"Bearer {API_KEY}"
     assert request.headers["X-Client"] == "sdk-test"
     assert request.headers["X-Request"] == "request"
-    assert request.headers["User-Agent"] == "bisibility-sdk-python/0.5.1"
-    assert request.headers["X-Bisibility-Client"] == "bisibility-sdk-python/0.5.1"
+    assert request.headers["User-Agent"] == "bisibility-sdk-python/0.6.0"
+    assert request.headers["X-Bisibility-Client"] == "bisibility-sdk-python/0.6.0"
     assert request.extensions["timeout"] == {
         "connect": 30.0,
         "read": 30.0,
@@ -1361,7 +1362,7 @@ def test_preserves_user_agent_and_allows_disabling_timeout() -> None:
 
     request = queue.requests[-1]
     assert request.headers["User-Agent"] == "my-app/1.0"
-    assert request.headers["X-Bisibility-Client"] == "bisibility-sdk-python/0.5.1"
+    assert request.headers["X-Bisibility-Client"] == "bisibility-sdk-python/0.6.0"
     assert request.extensions["timeout"] == {
         "connect": None,
         "read": None,
@@ -3428,10 +3429,14 @@ def test_provider_methods_and_settings_helpers() -> None:
         [
             json_response(list_response([provider()])),
             json_response(provider_connection(id="conn_b00000000000000000000000"), 201),
+            json_response(
+                provider_connection(id="conn_b00000000000000000000000", is_primary=True, priority=0)
+            ),
             json_response({"balance": 42, "message": "Provider ready", "ok": True}),
             json_response(provider_connection(enabled=False, priority=20)),
             json_response(provider_connection(enabled=True)),
             json_response(provider_connection(priority=5)),
+            json_response(provider_connection(is_primary=True, priority=0)),
             json_response(provider_connection(is_primary=True, priority=0)),
             json_response({"ok": True}),
         ]
@@ -3447,6 +3452,7 @@ def test_provider_methods_and_settings_helpers() -> None:
                 cost_per_check=0.01,
                 credentials=ProviderCredentialsInput(api_key="secret"),
                 primary=True,
+                priority=99,
             ),
         ).id
         == "conn_b00000000000000000000000"
@@ -3467,6 +3473,7 @@ def test_provider_methods_and_settings_helpers() -> None:
     )
     assert client.set_provider_priority("prj_a00000000000000000000000", "serpapi", 5).priority == 5
     assert client.set_primary_provider("prj_a00000000000000000000000", "serpapi").is_primary is True
+    assert client.set_primary_provider("prj_a00000000000000000000000", "serpapi", False).is_primary
     assert client.disconnect_provider("prj_a00000000000000000000000", "serpapi").ok is True
 
     assert (
@@ -3479,17 +3486,70 @@ def test_provider_methods_and_settings_helpers() -> None:
     assert request_json(queue.requests[1]) == {
         "cost_per_check": 0.01,
         "credentials": {"api_key": "secret"},
-        "primary": True,
     }
-    assert str(queue.requests[2].url) == (
+    assert request_json(queue.requests[2]) == {"priority": 0}
+    assert str(queue.requests[3].url) == (
         "https://api.test/api/v1/projects/prj_a00000000000000000000000/providers/serpapi/test"
     )
-    assert request_json(queue.requests[2]) == {"credentials": {"api_key": "secret"}}
-    assert request_json(queue.requests[3]) == {"enabled": False, "priority": 20}
-    assert request_json(queue.requests[4]) == {"enabled": True}
-    assert request_json(queue.requests[5]) == {"priority": 5}
-    assert request_json(queue.requests[6]) == {"primary": True}
-    assert queue.requests[7].method == "DELETE"
+    assert request_json(queue.requests[3]) == {"credentials": {"api_key": "secret"}}
+    assert request_json(queue.requests[4]) == {"enabled": False, "priority": 20}
+    assert request_json(queue.requests[5]) == {"enabled": True}
+    assert request_json(queue.requests[6]) == {"priority": 5}
+    assert request_json(queue.requests[7]) == {"priority": 0}
+    assert request_json(queue.requests[8]) == {}
+    assert queue.requests[9].method == "DELETE"
+
+
+def test_connect_provider_applies_explicit_priority_after_connect_without_key_reuse() -> None:
+    queue = QueueTransport(
+        [
+            json_response(provider_connection(), 201),
+            json_response(provider_connection(priority=7)),
+        ]
+    )
+    client = make_client(queue)
+
+    connection = client.connect_provider(
+        "prj_a00000000000000000000000",
+        "serpapi",
+        {
+            "credentials": {"api_key": "secret"},
+            "primary": False,
+            "priority": 7,
+        },
+        RequestOptions(
+            headers={"X-Request-Trace": "provider-connect"},
+            idempotency_key="connect-once",
+        ),
+    )
+
+    assert connection.priority == 7
+    assert request_json(queue.requests[0]) == {"credentials": {"api_key": "secret"}}
+    assert request_json(queue.requests[1]) == {"priority": 7}
+    assert queue.requests[0].headers["Idempotency-Key"] == "connect-once"
+    assert "Idempotency-Key" not in queue.requests[1].headers
+    assert queue.requests[1].headers["X-Request-Trace"] == "provider-connect"
+
+
+def test_connect_provider_exposes_connection_when_priority_follow_up_fails() -> None:
+    queue = QueueTransport(
+        [
+            json_response(provider_connection(id="conn_b00000000000000000000000"), 201),
+            json_response({"detail": "Priority update failed."}, 500),
+        ]
+    )
+    client = make_client(queue)
+
+    with pytest.raises(BisibilityProviderPrioritySyncError) as raised:
+        client.connect_provider(
+            "prj_a00000000000000000000000",
+            "serpapi",
+            {"primary": True},
+        )
+
+    assert raised.value.connection.id == "conn_b00000000000000000000000"
+    assert isinstance(raised.value.cause, BisibilityApiError)
+    assert len(queue.requests) == 2
 
 
 def test_connects_plausible_provider_with_endpoint_credential() -> None:
@@ -3513,6 +3573,7 @@ def test_connects_plausible_provider_with_endpoint_credential() -> None:
                 api_key="plausible-secret",
                 endpoint="https://plausible.example.com/api",
             ),
+            primary=False,
         ),
     )
 
