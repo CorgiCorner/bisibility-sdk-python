@@ -8,7 +8,7 @@
 > [API reference](https://bisibility.com/docs/api/overview) ·
 > [Roadmap](https://bisibility.com/roadmap)
 >
-> **Status:** Published on PyPI as v0.6.0.
+> **Status:** Release candidate: v0.7.0 is prepared; v0.6.0 remains published on PyPI.
 
 Python SDK for the Bisibility REST API.
 
@@ -181,6 +181,11 @@ bisibility.create_api_key(
   `max_cost_cents` for a best-effort request guard. Research source diagnostics report
   `ok`, `failed`, or `skipped`, including a machine-readable reason when applicable.
   Both methods expose nullable provider metrics, cache metadata, and paid BYO-key cost.
+- Domain overview: `analyze_domain_overview`, `load_domain_overview_history`,
+  `load_domain_overview_keywords`, and `load_domain_overview_pages`. Analyze with
+  `estimate_only=True` before a paid request; every operation that may spend requires an
+  explicit `max_cost_cents`, including `0` for a cache-only attempt. Responses preserve
+  snake_case market, snapshot, module, provider-cost, ranked-keyword, and relevant-page fields.
 - Rank checks: `list_rank_checks`, `run_rank_check`, `get_rank_check_result`
 - Signals: `create_signal`, `list_project_signals`
 - Alert rules: `list_alert_rules`, `create_alert_rule`, `update_alert_rule`,
@@ -265,6 +270,44 @@ project API keys), webhooks, alert rules, triggered alerts, team members, team
 invites, providers, saved views, saved keywords, competitors, and migration
 tokens.
 The async client exposes the same `iter_*` names as async iterators.
+
+### Domain overview
+
+Domain Overview reads public search-index estimates for a domain or subdomain. A cache miss can
+spend the project's connected provider account, so obtain the current price before explicitly
+accepting it:
+
+```python
+from math import ceil
+
+from bisibility import AnalyzeDomainOverviewOptions, DomainOverviewEstimate
+
+estimate = bisibility.analyze_domain_overview(
+    project_id,
+    AnalyzeDomainOverviewOptions(
+        target="example.com",
+        location_code=2840,
+        language_code="en",
+        estimate_only=True,
+    ),
+)
+if not isinstance(estimate.data, DomainOverviewEstimate):
+    raise RuntimeError("Expected a Domain Overview estimate")
+
+report = bisibility.analyze_domain_overview(
+    project_id,
+    AnalyzeDomainOverviewOptions(
+        target="example.com",
+        location_code=2840,
+        language_code="en",
+        max_cost_cents=ceil(estimate.data.estimated_cost_cents),
+    ),
+)
+```
+
+History and additional keyword/page loads use their dedicated option models and also require
+`max_cost_cents`. Cached-only callers can pass `0`; the API returns a problem response instead of
+silently spending when the requested data is not cached.
 
 ### Webhook secret rotation
 

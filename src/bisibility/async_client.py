@@ -211,8 +211,20 @@ class AsyncBisibilityClient(BisibilityClient):
     )
     research_keywords = _asyncify(BisibilityClient.research_keywords)  # type: ignore[assignment]
     analyze_backlinks = _asyncify(BisibilityClient.analyze_backlinks)  # type: ignore[assignment]
+    analyze_domain_overview = _asyncify(  # type: ignore[assignment]
+        BisibilityClient.analyze_domain_overview
+    )
     load_more_backlink_rows = _asyncify(  # type: ignore[assignment]
         BisibilityClient.load_more_backlink_rows
+    )
+    load_domain_overview_history = _asyncify(  # type: ignore[assignment]
+        BisibilityClient.load_domain_overview_history
+    )
+    load_domain_overview_keywords = _asyncify(  # type: ignore[assignment]
+        BisibilityClient.load_domain_overview_keywords
+    )
+    load_domain_overview_pages = _asyncify(  # type: ignore[assignment]
+        BisibilityClient.load_domain_overview_pages
     )
     get_keyword_metrics = _asyncify(BisibilityClient.get_keyword_metrics)  # type: ignore[assignment]
     add_keywords = _asyncify(BisibilityClient.add_keywords)  # type: ignore[assignment]

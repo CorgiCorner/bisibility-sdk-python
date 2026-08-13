@@ -36,6 +36,7 @@ from .models import (
     AlertRuleDeleteResult,
     AlertRuleInput,
     AnalyzeBacklinksOptions,
+    AnalyzeDomainOverviewOptions,
     ApiKey,
     ApiKeyCreateInput,
     BacklinksSnapshot,
@@ -65,6 +66,11 @@ from .models import (
     CreateSignalInput,
     CreateTeamInviteInput,
     DataResponse,
+    DomainOverviewHistoricalRow,
+    DomainOverviewModuleResult,
+    DomainOverviewOutcome,
+    DomainOverviewRankedKeywordsPage,
+    DomainOverviewRelevantPages,
     HealthResponse,
     IssuedMigrationToken,
     Keyword,
@@ -86,6 +92,9 @@ from .models import (
     ListSignalsOptions,
     ListTrafficSnapshotsOptions,
     LivenessResponse,
+    LoadDomainOverviewHistoryOptions,
+    LoadDomainOverviewKeywordsOptions,
+    LoadDomainOverviewPagesOptions,
     LoadMoreBacklinkRowsOptions,
     LocationSuggestion,
     Me,
@@ -164,7 +173,7 @@ _MISSING = object()
 try:
     SDK_VERSION = version("bisibility")
 except PackageNotFoundError:  # pragma: no cover - source tree without installed metadata
-    SDK_VERSION = "0.6.0"
+    SDK_VERSION = "0.7.0"
 CLIENT_ID = f"bisibility-sdk-python/{SDK_VERSION}"
 AUTH_TOKEN_PREFIXES = ("bsb_key_live_", "bsb_key_test_", "bsb_pat_live_", "mig_")
 
@@ -1000,6 +1009,74 @@ class BisibilityClient:
             f"/projects/{_encoded_path_segment(project_id, 'prj')}/backlinks/rows",
             body=body,
             response_model=DataResponse[BacklinksSnapshot],
+            request_options=request_options,
+        )
+
+    def analyze_domain_overview(
+        self,
+        project_id: str,
+        options: AnalyzeDomainOverviewOptions | Mapping[str, Any],
+        request_options: RequestOptionsLike = None,
+    ) -> DataResponse[DomainOverviewOutcome]:
+        """Analyze a domain or return a free estimate.
+
+        Non-estimate requests can spend the project's provider budget and must
+        include an explicit ``max_cost_cents`` accepted by the API.
+        """
+        return self._request(
+            "POST",
+            f"/projects/{_encoded_path_segment(project_id, 'prj')}/domain-overview/analyze",
+            body=_dump_body(options, AnalyzeDomainOverviewOptions),
+            response_model=DataResponse[DomainOverviewOutcome],
+            request_options=request_options,
+        )
+
+    def load_domain_overview_history(
+        self,
+        project_id: str,
+        options: LoadDomainOverviewHistoryOptions | Mapping[str, Any],
+        request_options: RequestOptionsLike = None,
+    ) -> DataResponse[DomainOverviewModuleResult[list[DomainOverviewHistoricalRow]]]:
+        """Load the priced historical index series for an unexpired snapshot."""
+        return self._request(
+            "POST",
+            f"/projects/{_encoded_path_segment(project_id, 'prj')}/domain-overview/history",
+            body=_dump_body(options, LoadDomainOverviewHistoryOptions),
+            response_model=DataResponse[
+                DomainOverviewModuleResult[list[DomainOverviewHistoricalRow]]
+            ],
+            request_options=request_options,
+        )
+
+    def load_domain_overview_keywords(
+        self,
+        project_id: str,
+        options: LoadDomainOverviewKeywordsOptions | Mapping[str, Any],
+        request_options: RequestOptionsLike = None,
+    ) -> DataResponse[DomainOverviewModuleResult[DomainOverviewRankedKeywordsPage]]:
+        """Load one priced page of ranked keywords for an unexpired snapshot."""
+        return self._request(
+            "POST",
+            f"/projects/{_encoded_path_segment(project_id, 'prj')}/domain-overview/keywords",
+            body=_dump_body(options, LoadDomainOverviewKeywordsOptions),
+            response_model=DataResponse[
+                DomainOverviewModuleResult[DomainOverviewRankedKeywordsPage]
+            ],
+            request_options=request_options,
+        )
+
+    def load_domain_overview_pages(
+        self,
+        project_id: str,
+        options: LoadDomainOverviewPagesOptions | Mapping[str, Any],
+        request_options: RequestOptionsLike = None,
+    ) -> DataResponse[DomainOverviewModuleResult[DomainOverviewRelevantPages]]:
+        """Load one priced relevant-pages page for an unexpired snapshot."""
+        return self._request(
+            "POST",
+            f"/projects/{_encoded_path_segment(project_id, 'prj')}/domain-overview/pages",
+            body=_dump_body(options, LoadDomainOverviewPagesOptions),
+            response_model=DataResponse[DomainOverviewModuleResult[DomainOverviewRelevantPages]],
             request_options=request_options,
         )
 

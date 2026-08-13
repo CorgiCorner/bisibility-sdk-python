@@ -143,6 +143,19 @@ TrafficSyncStatus: TypeAlias = Literal[
     "not_applicable",
 ]
 SitemapMonitorStatus: TypeAlias = Literal["active", "disabled", "pending"]
+DomainOverviewScope: TypeAlias = Literal["root", "subdomain"]
+DomainOverviewState: TypeAlias = Literal["no_data", "ok", "partial"]
+DomainOverviewFailureReason: TypeAlias = Literal[
+    "budget_exhausted",
+    "cost_limit_exceeded",
+    "in_progress",
+    "lookup_failed",
+    "needs_reauth",
+    "no_source",
+    "rate_limited",
+    "snapshot_expired",
+    "unsupported_location",
+]
 
 T = TypeVar("T")
 
@@ -577,6 +590,141 @@ class BacklinksSnapshot(BisibilityModel):
     target: str
     target_scope: Literal["site", "page"]
     total_rows_available: int = Field(ge=0)
+
+
+class DomainRankMetrics(BisibilityModel):
+    count: int | None = Field(default=None, ge=0)
+    estimated_traffic_cost_cents: float | None = Field(default=None, ge=0)
+    etv: float | None = Field(default=None, ge=0)
+    is_down: int = Field(ge=0)
+    is_lost: int = Field(ge=0)
+    is_new: int = Field(ge=0)
+    is_up: int = Field(ge=0)
+    pos1: int = Field(ge=0)
+    pos2_3: int = Field(ge=0)
+    pos4_10: int = Field(ge=0)
+    pos11_20: int = Field(ge=0)
+    pos21_30: int = Field(ge=0)
+    pos31_40: int = Field(ge=0)
+    pos41_50: int = Field(ge=0)
+    pos51_60: int = Field(ge=0)
+    pos61_70: int = Field(ge=0)
+    pos71_80: int = Field(ge=0)
+    pos81_90: int = Field(ge=0)
+    pos91_100: int = Field(ge=0)
+
+
+class DomainOverviewHistoricalRow(BisibilityModel):
+    metrics: DomainRankMetrics
+    month: int = Field(ge=1, le=12)
+    year: int = Field(ge=2020)
+
+
+class DomainOverviewRankedKeyword(BisibilityModel):
+    cpc_cents: float | None = Field(default=None, ge=0)
+    difficulty: float | None = Field(default=None, ge=0)
+    estimated_traffic: float | None = Field(default=None, ge=0)
+    intent: Literal["commercial", "informational", "navigational", "transactional"] | None
+    keyword: str
+    position: float | None = Field(default=None, ge=1)
+    rank_absolute: float | None = Field(default=None, ge=1)
+    rank_absolute_delta: float | None
+    ranking_url: str | None
+    search_volume: float | None = Field(default=None, ge=0)
+    serp_features: list[str]
+
+
+class DomainOverviewRankedKeywordsPage(BisibilityModel):
+    cost_cents: float = Field(ge=0)
+    rows: list[DomainOverviewRankedKeyword]
+    total_count: int | None = Field(default=None, ge=0)
+
+
+class DomainOverviewRelevantPage(BisibilityModel):
+    etv: float | None = Field(default=None, ge=0)
+    etv_delta_pct: float | None
+    keyword_count: int | None = Field(default=None, ge=0)
+    path: str
+    top_keyword: str | None
+    top_keyword_position: int | None = Field(default=None, ge=1)
+
+
+class DomainOverviewRelevantPages(BisibilityModel):
+    cost_cents: float = Field(ge=0)
+    rows: list[DomainOverviewRelevantPage]
+    total_count: int = Field(ge=0)
+
+
+class DomainOverviewModuleFailure(BisibilityModel):
+    cost_cents: float = Field(ge=0)
+    ok: Literal[False]
+    reason: DomainOverviewFailureReason
+    reset_at: int | None = Field(default=None, ge=0)
+
+
+class DomainOverviewModuleSuccess(BisibilityModel, Generic[T]):
+    cached: bool
+    cost_cents: float = Field(ge=0)
+    data: T
+    fetched_at: str
+    ok: Literal[True]
+
+
+class DomainOverviewModuleResult(BisibilityModel, Generic[T]):
+    """Successful top-level history or table module response."""
+
+    cached: bool
+    cost_cents: float = Field(ge=0)
+    data: T
+    fetched_at: str
+
+
+DomainOverviewKeywordsOutcome: TypeAlias = (
+    DomainOverviewModuleSuccess[DomainOverviewRankedKeywordsPage] | DomainOverviewModuleFailure
+)
+DomainOverviewPagesOutcome: TypeAlias = (
+    DomainOverviewModuleSuccess[DomainOverviewRelevantPages] | DomainOverviewModuleFailure
+)
+
+
+class DomainOverviewEstimate(BisibilityModel):
+    cached: bool
+    estimate: Literal[True]
+    estimated_cost_cents: float = Field(ge=0)
+    fresh_estimated_cost_cents: float = Field(ge=0)
+    history_estimated_cost_cents: float = Field(ge=0)
+    history_mode: Literal["lazy"]
+    keyword_page_estimated_cost_cents: float = Field(ge=0)
+    language_code: str
+    location_code: int = Field(gt=0)
+    page_page_estimated_cost_cents: float = Field(ge=0)
+    provider: str
+    scope: DomainOverviewScope
+    target: str
+
+
+class DomainOverviewReport(BisibilityModel):
+    cached: bool
+    cached_until: str
+    cost_cents: float = Field(ge=0)
+    fetched_at: str
+    history_mode: Literal["lazy"]
+    keywords: DomainOverviewKeywordsOutcome
+    language_code: str
+    location_code: int = Field(gt=0)
+    overview: DomainRankMetrics | None
+    pages: DomainOverviewPagesOutcome
+    previous_fetched_at: str | None
+    previous_overview: DomainRankMetrics | None
+    previous_source_snapshot_at: str | None
+    provider: str
+    scope: DomainOverviewScope
+    source_snapshot_at: str | None
+    state: DomainOverviewState
+    target: str
+
+
+DomainOverviewOutcome: TypeAlias = DomainOverviewEstimate | DomainOverviewReport
 
 
 class KeywordMetricsResponse(BisibilityModel):
@@ -1751,6 +1899,63 @@ class LoadMoreBacklinkRowsOptions(BisibilityModel):
     target_scope: Literal["site", "page"]
     include_subdomains: bool
     limit: int = Field(ge=100, le=1000, multiple_of=100)
+
+
+class AnalyzeDomainOverviewOptions(BisibilityModel):
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+
+    target: str = Field(min_length=1)
+    location_code: int = Field(gt=0)
+    language_code: str = Field(min_length=1)
+    scope_override: DomainOverviewScope | None = None
+    fresh: bool | None = None
+    max_cost_cents: int | None = Field(default=None, ge=0)
+    estimate_only: bool | None = None
+    keyword_limit: int | None = Field(default=None, ge=1, le=100)
+    page_limit: int | None = Field(default=None, ge=1, le=1000)
+
+    @model_validator(mode="after")
+    def require_paid_request_cap(self) -> AnalyzeDomainOverviewOptions:
+        if self.estimate_only is not True and self.max_cost_cents is None:
+            raise ValueError("max_cost_cents is required unless estimate_only is true")
+        return self
+
+
+class LoadDomainOverviewHistoryOptions(BisibilityModel):
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+
+    target: str = Field(min_length=1)
+    location_code: int = Field(gt=0)
+    language_code: str = Field(min_length=1)
+    scope_override: DomainOverviewScope | None = None
+    fresh: bool | None = None
+    max_cost_cents: int = Field(ge=0)
+
+
+class LoadDomainOverviewKeywordsOptions(BisibilityModel):
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+
+    target: str = Field(min_length=1)
+    location_code: int = Field(gt=0)
+    language_code: str = Field(min_length=1)
+    scope_override: DomainOverviewScope | None = None
+    fresh: bool | None = None
+    max_cost_cents: int = Field(ge=0)
+    limit: int = Field(ge=1, le=100)
+    offset: int = Field(ge=0)
+
+
+class LoadDomainOverviewPagesOptions(BisibilityModel):
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+
+    target: str = Field(min_length=1)
+    location_code: int = Field(gt=0)
+    language_code: str = Field(min_length=1)
+    scope_override: DomainOverviewScope | None = None
+    fresh: bool | None = None
+    max_cost_cents: int = Field(ge=0)
+    limit: int = Field(ge=1, le=1000)
+    offset: int = Field(ge=0)
 
 
 class KeywordMetricsInput(BisibilityModel):

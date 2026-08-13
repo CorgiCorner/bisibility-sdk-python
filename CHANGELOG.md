@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+## 0.7.0 - 2026-08-13
+
+- Add typed sync and async Domain Overview analyze, history, ranked-keyword, and relevant-page
+  operations with explicit provider-cost caps.
+
 ## 0.6.0 - 2026-08-10
 
 - `connect_provider` now applies requested priority with a follow-up settings update. Deprecated
