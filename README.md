@@ -8,7 +8,7 @@
 > [API reference](https://bisibility.com/docs/api/overview) ·
 > [Roadmap](https://bisibility.com/roadmap)
 >
-> **Status:** Release candidate: v0.7.0 is prepared; v0.6.0 remains published on PyPI.
+> **Status:** Release candidate: v0.8.0 is prepared; v0.7.0 remains published on PyPI.
 
 Python SDK for the Bisibility REST API.
 

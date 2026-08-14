@@ -268,6 +268,7 @@ class LocationSuggestion(BisibilityModel):
     display_name: str
     hl: str
     kind: LocationKind
+    language_code: str
     language_label: str
     location_key: str
     region_code: str | None
@@ -413,8 +414,11 @@ class Keyword(BisibilityModel):
     device: Device
     id: KeywordId
     intent: str | None = None
+    language_code: str
+    language_label: str
     latest_position: int | None
     location: str
+    location_key: str
     previous_position: int | None
     project_id: ProjectId
     ranking_url: str | None
@@ -435,6 +439,8 @@ class KeywordMatchRequest(BisibilityModel):
 class KeywordMatchMarket(BisibilityModel):
     country_code: str
     device: Device
+    language_code: str
+    language_label: str
     location: str
     location_key: str
 
@@ -762,7 +768,13 @@ class CreateKeywordInput(BisibilityModel):
     intent: str | None = None
     keyword: str
     location: str | None = None
-    location_key: str | None = None
+    location_key: str | None = Field(
+        default=None,
+        description=(
+            "Canonical country, region, or city key. Append `@language` for a non-default "
+            "language pair."
+        ),
+    )
     schedule: KeywordScheduleInput | None = None
     tags: list[str] | None = None
     target_url: str | None = None
@@ -805,7 +817,13 @@ class UpdateKeywordInput(BisibilityModel):
     intent: str | None = None
     keyword: str | None = None
     location: str | None = None
-    location_key: str | None = None
+    location_key: str | None = Field(
+        default=None,
+        description=(
+            "Canonical country, region, or city key. Append `@language` for a non-default "
+            "language pair."
+        ),
+    )
     schedule: KeywordScheduleInput | None = None
     tags: list[str] | None = None
     target_url: str | None = None

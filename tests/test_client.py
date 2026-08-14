@@ -35,6 +35,7 @@ from bisibility import (
     CreateSavedViewInput,
     CreateSignalInput,
     CreateTeamInviteInput,
+    Keyword,
     KeywordBulkInput,
     KeywordMatch,
     KeywordMatchMarket,
@@ -311,6 +312,8 @@ def keyword_match_response(**overrides: Any) -> dict[str, Any]:
                     "location_key": "US/Texas/Austin",
                     "country_code": "US",
                     "device": "desktop",
+                    "language_code": "en",
+                    "language_label": "English",
                 },
             }
         ],
@@ -326,8 +329,11 @@ def keyword(**overrides: Any) -> dict[str, Any]:
         "device": "desktop",
         "id": "kw_a00000000000000000000000",
         "intent": None,
+        "language_code": "en",
+        "language_label": "English",
         "latest_position": 4,
         "location": "United States",
+        "location_key": "US",
         "previous_position": 8,
         "project_id": "prj_a00000000000000000000000",
         "ranking_url": "https://example.com/page",
@@ -967,6 +973,7 @@ def test_searches_canonical_locations() -> None:
                             "display_name": "Austin, Texas, United States",
                             "hl": "en",
                             "kind": "city",
+                            "language_code": "en",
                             "language_label": "English",
                             "location_key": "US/Texas/Austin",
                             "region_code": "TX",
@@ -982,6 +989,7 @@ def test_searches_canonical_locations() -> None:
     result = client.search_locations(SearchLocationsOptions(country="US", limit=10, q="Austin"))
 
     assert result.data[0].location_key == "US/Texas/Austin"
+    assert result.data[0].language_code == "en"
     assert result.data[0].kind == "city"
     assert str(queue.requests[-1].url) == (
         "https://api.test/api/v1/locations/search?country=US&limit=10&q=Austin"
@@ -1344,8 +1352,8 @@ def test_sends_bearer_auth_and_default_headers_on_protected_requests() -> None:
     assert request.headers["Authorization"] == f"Bearer {API_KEY}"
     assert request.headers["X-Client"] == "sdk-test"
     assert request.headers["X-Request"] == "request"
-    assert request.headers["User-Agent"] == "bisibility-sdk-python/0.7.0"
-    assert request.headers["X-Bisibility-Client"] == "bisibility-sdk-python/0.7.0"
+    assert request.headers["User-Agent"] == "bisibility-sdk-python/0.8.0"
+    assert request.headers["X-Bisibility-Client"] == "bisibility-sdk-python/0.8.0"
     assert request.extensions["timeout"] == {
         "connect": 30.0,
         "read": 30.0,
@@ -1362,7 +1370,7 @@ def test_preserves_user_agent_and_allows_disabling_timeout() -> None:
 
     request = queue.requests[-1]
     assert request.headers["User-Agent"] == "my-app/1.0"
-    assert request.headers["X-Bisibility-Client"] == "bisibility-sdk-python/0.7.0"
+    assert request.headers["X-Bisibility-Client"] == "bisibility-sdk-python/0.8.0"
     assert request.extensions["timeout"] == {
         "connect": None,
         "read": None,
@@ -2009,6 +2017,8 @@ def test_keyword_match_models_match_openapi_field_sets() -> None:
     assert set(KeywordMatchMarket.model_fields) == {
         "country_code",
         "device",
+        "language_code",
+        "language_label",
         "location",
         "location_key",
     }
@@ -2027,6 +2037,52 @@ def test_keyword_match_models_match_openapi_field_sets() -> None:
     assert KeywordMatchMeta.model_fields["truncated_texts"].description == (
         "Normalized texts with more than 100 matching markets. Their returned rows are partial."
     )
+
+
+def test_language_qualified_market_models_require_contract_fields() -> None:
+    keyword_response = keyword()
+    keyword_response.pop("location_key")
+    with pytest.raises(ValidationError):
+        Keyword.model_validate(keyword_response)
+
+    keyword_response = keyword()
+    keyword_response.pop("language_code")
+    with pytest.raises(ValidationError):
+        Keyword.model_validate(keyword_response)
+
+    keyword_response = keyword()
+    keyword_response.pop("language_label")
+    with pytest.raises(ValidationError):
+        Keyword.model_validate(keyword_response)
+
+    market_response = keyword_match_response()["data"][0]["market"]
+    market_response.pop("language_code")
+    with pytest.raises(ValidationError):
+        KeywordMatchMarket.model_validate(market_response)
+
+    market_response = keyword_match_response()["data"][0]["market"]
+    market_response.pop("language_label")
+    with pytest.raises(ValidationError):
+        KeywordMatchMarket.model_validate(market_response)
+
+    location_response = {
+        "city_name": None,
+        "country_code": "ES",
+        "display_name": "Spain - Spanish",
+        "hl": "es",
+        "kind": "country",
+        "language_label": "Spanish",
+        "location_key": "ES@es",
+        "region_code": None,
+        "region_name": None,
+    }
+    with pytest.raises(ValidationError):
+        LocationSuggestion.model_validate(location_response)
+
+
+def test_keyword_models_expose_language_qualified_market_fields() -> None:
+    assert {"language_code", "language_label", "location_key"} <= set(Keyword.model_fields)
+    assert LocationSuggestion.model_fields["language_code"].is_required()
 
 
 def test_match_project_keywords_maps_forbidden() -> None:
@@ -2659,7 +2715,7 @@ def test_create_keywords_sends_market_and_classification_fields() -> None:
                     city="Austin",
                     intent="commercial",
                     keyword="rank tracker",
-                    location_key="US/Texas/Austin",
+                    location_key="ES@ca",
                     topic="rank tracking",
                 )
             ]
@@ -2676,7 +2732,7 @@ def test_create_keywords_sends_market_and_classification_fields() -> None:
                 "city": "Austin",
                 "intent": "commercial",
                 "keyword": "rank tracker",
-                "location_key": "US/Texas/Austin",
+                "location_key": "ES@ca",
                 "topic": "rank tracking",
             }
         ]
@@ -2707,7 +2763,7 @@ def test_update_keyword_sends_market_and_classification_fields() -> None:
         UpdateKeywordInput(
             city="Austin",
             intent="informational",
-            location_key="US/Texas/Austin",
+            location_key="ES@ca",
             topic="docs",
         ),
     )
@@ -2717,9 +2773,17 @@ def test_update_keyword_sends_market_and_classification_fields() -> None:
     assert request_json(queue.requests[-1]) == {
         "city": "Austin",
         "intent": "informational",
-        "location_key": "US/Texas/Austin",
+        "location_key": "ES@ca",
         "topic": "docs",
     }
+    assert CreateKeywordInput.model_fields["location_key"].description == (
+        "Canonical country, region, or city key. Append `@language` for a non-default "
+        "language pair."
+    )
+    assert UpdateKeywordInput.model_fields["location_key"].description == (
+        "Canonical country, region, or city key. Append `@language` for a non-default "
+        "language pair."
+    )
 
 
 def test_gets_updates_sets_target_url_and_deletes_keyword() -> None:

@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+## 0.8.0 - 2026-08-14
+
+- Add language-qualified market fields to typed keyword and location models.
+
 ## 0.7.0 - 2026-08-13
 
 - Add typed sync and async Domain Overview analyze, history, ranked-keyword, and relevant-page
