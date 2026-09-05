@@ -1,6 +1,12 @@
 # Changelog
 
-## Unreleased
+## 0.9.0 - 2026-09-05
+
+- Model the queued rank-check contract: `run_rank_check` returns either the completed check or the
+  queued run answered with 202, and rank checks carry `run_id`.
+- Add `run_rank_check_and_wait`, which follows a queued run to its check and raises
+  `BisibilityTimeoutError` at the deadline.
+- Register the `rcr` rank-check-run public identifier prefix.
 
 ## 0.8.0 - 2026-08-14
 

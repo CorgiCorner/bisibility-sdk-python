@@ -99,6 +99,10 @@ class BisibilityConfigurationError(BisibilityError):
     pass
 
 
+class BisibilityTimeoutError(BisibilityError):
+    """Raised when a queued rank-check run does not finish before the deadline."""
+
+
 class BisibilityNetworkError(BisibilityError):
     cause: BaseException
     method: str

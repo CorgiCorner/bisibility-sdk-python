@@ -5,7 +5,7 @@ import json
 import re
 from collections.abc import Mapping, Sequence
 from datetime import date, datetime
-from typing import Annotated, Any, Generic, Literal, TypeAlias, TypeVar
+from typing import Annotated, Any, ClassVar, Generic, Literal, TypeAlias, TypeVar
 
 from pydantic import (
     AfterValidator,
@@ -13,6 +13,7 @@ from pydantic import (
     BaseModel,
     ConfigDict,
     Field,
+    TypeAdapter,
     field_validator,
     model_validator,
 )
@@ -31,6 +32,7 @@ from .public_ids import (
     MemberId,
     PersonalAccessTokenId,
     ProjectId,
+    RankCheckRunId,
     SavedKeywordId,
     SignalId,
     TagId,
@@ -865,7 +867,28 @@ class RankCheck(BisibilityModel):
     previous_position: int | None
     provider: str
     ranking_url: str | None
+    run_id: RankCheckRunId | None = None
     status: str
+
+
+class RankCheckRunQueued(BisibilityModel):
+    """The queued run returned with 202 where a background worker owns execution."""
+
+    id: RankCheckRunId
+    status: Literal["queued"]
+
+
+RunRankCheckResult: TypeAlias = RankCheck | RankCheckRunQueued
+
+
+class RunRankCheckResultAdapter:
+    """Validates the completed-or-queued union the check request endpoint returns."""
+
+    _adapter: ClassVar[TypeAdapter[RunRankCheckResult]] = TypeAdapter(RunRankCheckResult)
+
+    @classmethod
+    def model_validate(cls, value: object) -> RunRankCheckResult:
+        return cls._adapter.validate_python(value)
 
 
 class RankHistoryExportRow(BisibilityModel):

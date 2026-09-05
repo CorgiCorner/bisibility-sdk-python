@@ -23,6 +23,7 @@ from bisibility import (
     BisibilityNetworkError,
     BisibilityProviderPrioritySyncError,
     BisibilityResponseError,
+    BisibilityTimeoutError,
     CloudImportFinalizeResponse,
     CloudImportPackage,
     CloudImportSessionCreate,
@@ -63,6 +64,7 @@ from bisibility import (
     ProjectOverview,
     ProjectOverviewOptions,
     ProviderCredentialsInput,
+    RankCheckRunQueued,
     RankHistoryExportOptions,
     RequestOptions,
     RunRankCheckInput,
@@ -359,6 +361,7 @@ def rank_check(**overrides: Any) -> dict[str, Any]:
         "previous_position": 8,
         "provider": "dataforseo",
         "ranking_url": "https://example.com/page",
+        "run_id": None,
         "status": "completed",
         **overrides,
     }
@@ -1014,6 +1017,7 @@ def test_public_id_registry_and_shape_are_fixed() -> None:
         "ntf",
         "pat",
         "prj",
+        "rcr",
         "sid",
         "sig",
         "svkw",
@@ -1352,8 +1356,8 @@ def test_sends_bearer_auth_and_default_headers_on_protected_requests() -> None:
     assert request.headers["Authorization"] == f"Bearer {API_KEY}"
     assert request.headers["X-Client"] == "sdk-test"
     assert request.headers["X-Request"] == "request"
-    assert request.headers["User-Agent"] == "bisibility-sdk-python/0.8.0"
-    assert request.headers["X-Bisibility-Client"] == "bisibility-sdk-python/0.8.0"
+    assert request.headers["User-Agent"] == "bisibility-sdk-python/0.9.0"
+    assert request.headers["X-Bisibility-Client"] == "bisibility-sdk-python/0.9.0"
     assert request.extensions["timeout"] == {
         "connect": 30.0,
         "read": 30.0,
@@ -1370,7 +1374,7 @@ def test_preserves_user_agent_and_allows_disabling_timeout() -> None:
 
     request = queue.requests[-1]
     assert request.headers["User-Agent"] == "my-app/1.0"
-    assert request.headers["X-Bisibility-Client"] == "bisibility-sdk-python/0.8.0"
+    assert request.headers["X-Bisibility-Client"] == "bisibility-sdk-python/0.9.0"
     assert request.extensions["timeout"] == {
         "connect": None,
         "read": None,
@@ -2921,24 +2925,21 @@ def test_rank_check_exposes_provider_fallback_attempts() -> None:
     assert check.attempts[1].message == "Provider timed out."
 
 
-def test_runs_rank_check_in_async_mode() -> None:
-    queue = QueueTransport(
-        [
-            json_response(rank_check(position=None, status="running"), 202),
-            json_response(rank_check(position=None, status="running"), 202),
-        ]
-    )
+def test_returns_the_queued_run_when_a_worker_owns_execution() -> None:
+    queued = {"id": "rcr_a00000000000000000000000", "status": "queued"}
+    queue = QueueTransport([json_response(queued, 202), json_response(queued, 202)])
     client = make_client(queue)
 
     accepted = client.run_rank_check("kw_a00000000000000000000000", async_mode=True)
-    assert accepted.status == "running"
+    assert isinstance(accepted, RankCheckRunQueued)
+    assert accepted.id == "rcr_a00000000000000000000000"
     assert (
         client.run_rank_check(
             "kw_a00000000000000000000000",
             RunRankCheckInput(provider_id="dataforseo"),
             async_mode=True,
         ).status
-        == "running"
+        == "queued"
     )
 
     assert (
@@ -2951,6 +2952,48 @@ def test_runs_rank_check_in_async_mode() -> None:
         == "https://api.test/api/v1/keywords/kw_a00000000000000000000000/checks?async=true"
     )
     assert request_json(queue.requests[1]) == {"provider_id": "dataforseo"}
+
+
+def test_follows_a_queued_run_to_the_check_carrying_its_run_id() -> None:
+    finished = rank_check(run_id="rcr_a00000000000000000000000")
+    queue = QueueTransport(
+        [
+            json_response({"id": "rcr_a00000000000000000000000", "status": "queued"}, 202),
+            json_response(list_response([rank_check()])),
+            json_response(list_response([finished])),
+        ]
+    )
+    client = make_client(queue)
+
+    check = client.run_rank_check_and_wait("kw_a00000000000000000000000", poll_interval_seconds=0.0)
+
+    assert check.run_id == "rcr_a00000000000000000000000"
+    assert len(queue.requests) == 3
+
+
+def test_gives_up_on_a_queued_run_that_never_produces_a_check() -> None:
+    queue = QueueTransport(
+        [
+            json_response({"id": "rcr_a00000000000000000000000", "status": "queued"}, 202),
+            json_response(list_response([])),
+        ]
+    )
+    client = make_client(queue)
+
+    with pytest.raises(BisibilityTimeoutError):
+        client.run_rank_check_and_wait(
+            "kw_a00000000000000000000000", timeout_seconds=0.0, poll_interval_seconds=0.0
+        )
+
+
+def test_returns_the_finished_check_without_polling_when_it_runs_inline() -> None:
+    queue = QueueTransport([json_response(rank_check(), 201)])
+    client = make_client(queue)
+
+    check = client.run_rank_check_and_wait("kw_a00000000000000000000000")
+
+    assert check.id == "check_a00000000000000000000000"
+    assert len(queue.requests) == 1
 
 
 def test_lists_rank_checks_filtered_by_running_status() -> None:

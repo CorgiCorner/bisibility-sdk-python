@@ -29,6 +29,7 @@ from .errors import (
     BisibilityNetworkError,
     BisibilityProviderPrioritySyncError,
     BisibilityResponseError,
+    BisibilityTimeoutError,
 )
 from .models import (
     AddCompetitorInput,
@@ -121,6 +122,7 @@ from .models import (
     ProviderSettingsInput,
     ProviderTestResult,
     RankCheck,
+    RankCheckRunQueued,
     RankedKeywordSuggestionsResponse,
     RankHistoryExportOptions,
     RankHistoryExportResponse,
@@ -128,6 +130,8 @@ from .models import (
     ReadinessResponse,
     RevokedTeamInvite,
     RunRankCheckInput,
+    RunRankCheckResult,
+    RunRankCheckResultAdapter,
     SavedKeyword,
     SavedKeywordDeleteResult,
     SavedView,
@@ -173,7 +177,7 @@ _MISSING = object()
 try:
     SDK_VERSION = version("bisibility")
 except PackageNotFoundError:  # pragma: no cover - source tree without installed metadata
-    SDK_VERSION = "0.8.0"
+    SDK_VERSION = "0.9.0"
 CLIENT_ID = f"bisibility-sdk-python/{SDK_VERSION}"
 AUTH_TOKEN_PREFIXES = ("bsb_key_live_", "bsb_key_test_", "bsb_pat_live_", "mig_")
 
@@ -1209,28 +1213,63 @@ class BisibilityClient:
         request_options: RequestOptionsLike = None,
         *,
         async_mode: bool = False,
-    ) -> RankCheck:
+    ) -> RunRankCheckResult:
         """Run a rank check for a keyword via POST /keywords/{id}/checks.
 
-        When ``async_mode`` is True the request is sent with ``?async=true`` and
-        the server answers ``202 Accepted`` with a rank check in status
-        ``"running"``; poll ``get_rank_check_result`` until it completes or
-        fails. Otherwise the call blocks until the check finishes and returns
-        the completed rank check with ``201 Created``.
+        How the check executes belongs to the deployment, not to this call.
+        Where a background worker owns execution the server answers ``202
+        Accepted`` with the queued run, and where checks run inline it answers
+        ``201 Created`` with the finished check. Narrow the result on
+        ``status``, or call ``run_rank_check_and_wait``. ``async_mode`` is kept
+        for compatibility and no longer changes what the server does.
         """
         body: object = _MISSING
         if input is not None:
             dumped = _dump_jsonable(input)
             if dumped:
                 body = dumped
-        return self._request(
-            "POST",
-            f"/keywords/{_encoded_path_segment(keyword_id, 'kw')}/checks",
-            body=body,
-            query={"async": True} if async_mode else None,
-            response_model=RankCheck,
-            request_options=request_options,
+        # The adapter validates the union; the transport only needs a model_validate callable.
+        return cast(
+            RunRankCheckResult,
+            self._request(
+                "POST",
+                f"/keywords/{_encoded_path_segment(keyword_id, 'kw')}/checks",
+                body=body,
+                query={"async": True} if async_mode else None,
+                response_model=RunRankCheckResultAdapter,
+                request_options=request_options,
+            ),
         )
+
+    def run_rank_check_and_wait(
+        self,
+        keyword_id: str,
+        input: RunRankCheckInput | Mapping[str, Any] | None = None,
+        request_options: RequestOptionsLike = None,
+        *,
+        timeout_seconds: float = 120.0,
+        poll_interval_seconds: float = 1.0,
+    ) -> RankCheck:
+        """Run a rank check and return the finished check.
+
+        A queued run is followed to its result through the ``run_id`` carried by
+        every rank check. Raises ``BisibilityTimeoutError`` when the deadline
+        passes before the check appears.
+        """
+        started = self.run_rank_check(keyword_id, input, request_options)
+        if not isinstance(started, RankCheckRunQueued):
+            return started
+        deadline = time.monotonic() + timeout_seconds
+        while True:
+            history = self.list_rank_checks(keyword_id, {"limit": 50}, request_options)
+            for check in history.data:
+                if check.run_id == started.id:
+                    return check
+            if time.monotonic() >= deadline:
+                raise BisibilityTimeoutError(
+                    f"Rank check run {started.id} did not produce a check in time."
+                )
+            time.sleep(poll_interval_seconds)
 
     def get_rank_check_result(
         self,

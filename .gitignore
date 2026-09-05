@@ -23,3 +23,6 @@ dist/
 
 # Graphify knowledge graph - generated, machine-local (regenerate: graphify update .)
 graphify-out/
+
+# Local git worktrees, never part of the distribution.
+.wt/

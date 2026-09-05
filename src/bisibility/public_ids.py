@@ -29,6 +29,7 @@ PublicIdPrefix: TypeAlias = Literal[
     "ntf",
     "pat",
     "prj",
+    "rcr",
     "sid",
     "sig",
     "svkw",
@@ -56,6 +57,7 @@ PUBLIC_ID_PREFIXES: frozenset[PublicIdPrefix] = frozenset(
         "ntf",
         "pat",
         "prj",
+        "rcr",
         "sid",
         "sig",
         "svkw",
@@ -100,6 +102,7 @@ MemberId: TypeAlias = Annotated[str, Field(pattern=public_id_pattern("mbr"))]
 NotificationId: TypeAlias = Annotated[str, Field(pattern=public_id_pattern("ntf"))]
 PersonalAccessTokenId: TypeAlias = Annotated[str, Field(pattern=public_id_pattern("pat"))]
 ProjectId: TypeAlias = Annotated[str, Field(pattern=public_id_pattern("prj"))]
+RankCheckRunId: TypeAlias = Annotated[str, Field(pattern=public_id_pattern("rcr"))]
 SessionId: TypeAlias = Annotated[str, Field(pattern=public_id_pattern("sid"))]
 SignalId: TypeAlias = Annotated[str, Field(pattern=public_id_pattern("sig"))]
 SavedKeywordId: TypeAlias = Annotated[str, Field(pattern=public_id_pattern("svkw"))]

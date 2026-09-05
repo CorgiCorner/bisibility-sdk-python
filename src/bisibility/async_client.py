@@ -238,6 +238,9 @@ class AsyncBisibilityClient(BisibilityClient):
     bulk_update_keywords = _asyncify(BisibilityClient.bulk_update_keywords)  # type: ignore[assignment]
     list_rank_checks = _asyncify(BisibilityClient.list_rank_checks)  # type: ignore[assignment]
     run_rank_check = _asyncify(BisibilityClient.run_rank_check)  # type: ignore[assignment]
+    run_rank_check_and_wait = _asyncify(  # type: ignore[assignment]
+        BisibilityClient.run_rank_check_and_wait
+    )
     get_rank_check_result = _asyncify(BisibilityClient.get_rank_check_result)  # type: ignore[assignment]
     create_signal = _asyncify(BisibilityClient.create_signal)  # type: ignore[assignment]
     list_project_signals = _asyncify(BisibilityClient.list_project_signals)  # type: ignore[assignment]

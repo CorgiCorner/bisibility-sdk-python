@@ -8,7 +8,7 @@
 > [API reference](https://bisibility.com/docs/api/overview) ·
 > [Roadmap](https://bisibility.com/roadmap)
 >
-> **Status:** Release candidate: v0.8.0 is prepared; v0.7.0 remains published on PyPI.
+> **Status:** Published on PyPI as v0.9.0.
 
 Python SDK for the Bisibility REST API.
 
@@ -52,7 +52,7 @@ if project_id:
 
     keyword_id = created.results[0].keyword.id if created.results else None
     if keyword_id:
-        check = bisibility.run_rank_check(keyword_id)
+        check = bisibility.run_rank_check_and_wait(keyword_id)
         print(check.position, check.ranking_url)
 ```
 
@@ -186,7 +186,8 @@ bisibility.create_api_key(
   `estimate_only=True` before a paid request; every operation that may spend requires an
   explicit `max_cost_cents`, including `0` for a cache-only attempt. Responses preserve
   snake_case market, snapshot, module, provider-cost, ranked-keyword, and relevant-page fields.
-- Rank checks: `list_rank_checks`, `run_rank_check`, `get_rank_check_result`
+- Rank checks: `list_rank_checks`, `run_rank_check`, `run_rank_check_and_wait`,
+  `get_rank_check_result`
 - Signals: `create_signal`, `list_project_signals`
 - Alert rules: `list_alert_rules`, `create_alert_rule`, `update_alert_rule`,
   `delete_alert_rule`, `list_triggered_alerts`, `mute_triggered_alert`,
@@ -378,19 +379,31 @@ estimate = anonymous.get_cost_estimate(
 print(estimate.data.monthly_cost_usd)
 ```
 
-### Async rank checks
+### Queued rank checks
 
-`run_rank_check` blocks until the check completes by default. Pass
-`async_mode=True` to queue the check instead: the server responds with
-`202 Accepted` and a rank check in status `"running"`; poll
-`get_rank_check_result` until the status becomes `"completed"` or `"failed"`.
+How a requested check executes belongs to the deployment, not to the call.
+Where a background worker owns execution the server answers `202 Accepted` with
+the queued run, and where checks run inline it answers `201 Created` with the
+finished check. `run_rank_check` returns that union.
 
 ```python
-queued = bisibility.run_rank_check(keyword_id, async_mode=True)
-assert queued.status == "running"
-
-result = bisibility.get_rank_check_result(queued.id)
+started = bisibility.run_rank_check(keyword_id)
+if isinstance(started, RankCheckRunQueued):
+    print(f"Queued as run {started.id}")
 ```
+
+Every rank check carries the `run_id` of the run that produced it, which is how
+a queued run is followed to its result. `run_rank_check_and_wait` does that
+polling and returns the finished check, raising `BisibilityTimeoutError` when
+the deadline passes.
+
+```python
+check = bisibility.run_rank_check_and_wait(keyword_id, timeout_seconds=120)
+print(check.position, check.ranking_url)
+```
+
+`async_mode` is retained for compatibility and no longer changes what the
+server does.
 
 ## Typed Inputs
 
@@ -430,9 +443,7 @@ from bisibility import (
     UpdateProjectInput,
 )
 
-project = bisibility.update_project(
-    project_id, UpdateProjectInput(name="Marketing site")
-)
+project = bisibility.update_project(project_id, UpdateProjectInput(name="Marketing site"))
 
 defaults = bisibility.update_project_defaults(
     project_id,
