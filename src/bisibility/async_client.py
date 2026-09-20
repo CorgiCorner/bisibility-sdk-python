@@ -577,6 +577,8 @@ class AsyncBisibilityClient(BisibilityClient):
         if "User-Agent" not in headers:
             headers["User-Agent"] = CLIENT_ID
         headers["X-Bisibility-Client"] = CLIENT_ID
+        if "X-Bisibility-Source" not in headers:
+            headers["X-Bisibility-Source"] = "sdk"
 
         request_kwargs: dict[str, Any] = {"headers": headers}
         if not isinstance(options.timeout, _UnsetTimeout):

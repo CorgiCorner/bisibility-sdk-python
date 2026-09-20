@@ -177,7 +177,7 @@ _MISSING = object()
 try:
     SDK_VERSION = version("bisibility")
 except PackageNotFoundError:  # pragma: no cover - source tree without installed metadata
-    SDK_VERSION = "0.9.0"
+    SDK_VERSION = "0.10.0"
 CLIENT_ID = f"bisibility-sdk-python/{SDK_VERSION}"
 AUTH_TOKEN_PREFIXES = ("bsb_key_live_", "bsb_key_test_", "bsb_pat_live_", "mig_")
 
@@ -2453,6 +2453,8 @@ class BisibilityClient:
         if "User-Agent" not in headers:
             headers["User-Agent"] = CLIENT_ID
         headers["X-Bisibility-Client"] = CLIENT_ID
+        if "X-Bisibility-Source" not in headers:
+            headers["X-Bisibility-Source"] = "sdk"
 
         request_kwargs: dict[str, Any] = {"headers": headers}
         if not isinstance(options.timeout, _UnsetTimeout):

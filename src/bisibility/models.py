@@ -905,6 +905,7 @@ RankHistoryExportResponse: TypeAlias = ListResponse[RankHistoryExportRow]
 
 
 class RunRankCheckInput(BisibilityModel):
+    max_cost_cents: int | None = None
     provider_id: str | None = None
 
 

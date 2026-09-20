@@ -8,7 +8,7 @@
 > [API reference](https://bisibility.com/docs/api/overview) ·
 > [Roadmap](https://bisibility.com/roadmap)
 >
-> **Status:** Published on PyPI as v0.9.0.
+> **Status:** Published on PyPI as v0.10.0.
 
 Python SDK for the Bisibility REST API.
 
@@ -138,7 +138,9 @@ API, as shown in the quickstart, instead of embedding synthetic resource IDs.
 The default timeout is 30 seconds per attempt. Pass `timeout=None` to the client
 to opt out globally, or `RequestOptions(timeout=None)` for one request. The SDK
 sends `User-Agent: bisibility-sdk-python/<version>` unless you supplied a user
-agent, and always sends the matching `X-Bisibility-Client` header.
+agent, and always sends the matching `X-Bisibility-Client` header. Every request also declares its
+origin with `X-Bisibility-Source: sdk` for usage reporting; a default header you pass to the
+client with the same name wins.
 
 ### Retries
 

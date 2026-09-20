@@ -119,6 +119,7 @@ def test_async_factory_request_headers_timeout_and_owned_lifecycle() -> None:
     assert request.headers["Authorization"] == f"Bearer {API_KEY}"
     assert request.headers["X-Bisibility-Project"] == "prj_a00000000000000000000000"
     assert request.headers["X-Bisibility-Client"].startswith("bisibility-sdk-python/")
+    assert request.headers["X-Bisibility-Source"] == "sdk"
     assert request.extensions["timeout"] == {
         "connect": 30.0,
         "pool": 30.0,

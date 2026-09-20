@@ -1356,8 +1356,9 @@ def test_sends_bearer_auth_and_default_headers_on_protected_requests() -> None:
     assert request.headers["Authorization"] == f"Bearer {API_KEY}"
     assert request.headers["X-Client"] == "sdk-test"
     assert request.headers["X-Request"] == "request"
-    assert request.headers["User-Agent"] == "bisibility-sdk-python/0.9.0"
-    assert request.headers["X-Bisibility-Client"] == "bisibility-sdk-python/0.9.0"
+    assert request.headers["User-Agent"] == "bisibility-sdk-python/0.10.0"
+    assert request.headers["X-Bisibility-Client"] == "bisibility-sdk-python/0.10.0"
+    assert request.headers["X-Bisibility-Source"] == "sdk"
     assert request.extensions["timeout"] == {
         "connect": 30.0,
         "read": 30.0,
@@ -1368,13 +1369,14 @@ def test_sends_bearer_auth_and_default_headers_on_protected_requests() -> None:
 
 def test_preserves_user_agent_and_allows_disabling_timeout() -> None:
     queue = QueueTransport([json_response(list_response([project()]))])
-    client = make_client(queue, headers={"User-Agent": "my-app/1.0"})
+    client = make_client(queue, headers={"User-Agent": "my-app/1.0", "X-Bisibility-Source": "cli"})
 
     client.list_projects(RequestOptions(timeout=None))
 
     request = queue.requests[-1]
     assert request.headers["User-Agent"] == "my-app/1.0"
-    assert request.headers["X-Bisibility-Client"] == "bisibility-sdk-python/0.9.0"
+    assert request.headers["X-Bisibility-Client"] == "bisibility-sdk-python/0.10.0"
+    assert request.headers["X-Bisibility-Source"] == "cli"
     assert request.extensions["timeout"] == {
         "connect": None,
         "read": None,
@@ -2872,7 +2874,8 @@ def test_lists_runs_and_gets_rank_checks() -> None:
         == "eyJ2IjozLCJvIjoyfQ"
     )
     run_result = client.run_rank_check(
-        "kw_a00000000000000000000000", RunRankCheckInput(provider_id="dataforseo")
+        "kw_a00000000000000000000000",
+        RunRankCheckInput(max_cost_cents=5, provider_id="dataforseo"),
     )
     assert run_result.id == "check_a00000000000000000000000"
     assert (
@@ -2890,7 +2893,10 @@ def test_lists_runs_and_gets_rank_checks() -> None:
         == "https://api.test/api/v1/keywords/kw_a00000000000000000000000/checks"
     )
     assert queue.requests[1].method == "POST"
-    assert request_json(queue.requests[1]) == {"provider_id": "dataforseo"}
+    assert request_json(queue.requests[1]) == {
+        "max_cost_cents": 5,
+        "provider_id": "dataforseo",
+    }
     assert (
         str(queue.requests[2].url)
         == "https://api.test/api/v1/rank-checks/check_b00000000000000000000000"
