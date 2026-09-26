@@ -1,5 +1,34 @@
 # Changelog
 
+## 0.11.0 - 2026-09-27
+
+- Added saved research report reads and separate own-key and credit provider budget methods.
+
+- **Breaking for typed consumers:** `analyze_backlinks` now returns `data` as
+  `BacklinksEstimate | BacklinksSnapshot`. With `estimate_only=True` the API answers with a
+  cost-only `BacklinksEstimate` that carries no `summary`, `history`, `rows`, `fetched_at`,
+  `fetched_row_count`, or `total_rows_available`, and `BacklinksSnapshot` no longer carries
+  `estimate` or `estimated_cost_cents`. Use `isinstance(response.data, BacklinksEstimate)` to tell
+  them apart. `load_more_backlink_rows` still returns a snapshot.
+- **Breaking for typed consumers:** `KeywordResearchResponse` is now the union
+  `KeywordResearchEstimate | KeywordResearchResult` instead of one model. With
+  `estimate_only=True` the API answers with a cost-only `KeywordResearchEstimate` whose
+  `sources` carry `{source, cost_cents, cached}` only, and `KeywordResearchResult` no longer
+  carries `estimate`. Use `isinstance(response, KeywordResearchEstimate)` to tell them apart.
+- Add `serp_depth` (`10`, `20`, `50`, or `100`) to `ProjectDefaultsPatch`. Omitting it keeps the
+  stored depth, like `serp_stop_on_match`; the schedule fields are still replaced as a whole.
+- `connect_provider` now sends `priority` with the connect request instead of following the
+  connect with a settings PATCH, so connecting at a chosen priority is a single request. A
+  rejected priority now fails the connect with `BisibilityApiError`;
+  `BisibilityProviderPrioritySyncError` stays exported but is deprecated and no longer raised.
+- Document that a provider connection test answers `"Connected."`, or `"Connected · <detail>."`
+  for analytics providers, and that Plausible's `credentials.login` is the Plausible site domain
+  (its `site_id`) that defaults to the project domain when omitted, with `credentials.api_key`
+  holding the Stats API token.
+- Export `BacklinksEstimate`, `BacklinksOutcome`, `BacklinksTargetScope`,
+  `KeywordResearchEstimate`, `KeywordResearchEstimateSource`, `KeywordResearchResult`, and
+  `SerpDepth`.
+
 ## 0.10.0 - 2026-09-20
 
 - Add `max_cost_cents` to `RunRankCheckInput`; the server refuses the check with

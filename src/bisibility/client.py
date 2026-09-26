@@ -20,14 +20,12 @@ from typing import Any, Literal, TypeAlias, TypeVar, cast
 from urllib.parse import quote, urlencode, urlsplit
 
 import httpx
-from pydantic import BaseModel, ValidationError
+from pydantic import BaseModel, TypeAdapter, ValidationError
 
 from .errors import (
     BisibilityApiError,
     BisibilityConfigurationError,
-    BisibilityError,
     BisibilityNetworkError,
-    BisibilityProviderPrioritySyncError,
     BisibilityResponseError,
     BisibilityTimeoutError,
 )
@@ -40,6 +38,7 @@ from .models import (
     AnalyzeDomainOverviewOptions,
     ApiKey,
     ApiKeyCreateInput,
+    BacklinksOutcome,
     BacklinksSnapshot,
     Capability,
     CloudImportChunkResponse,
@@ -116,6 +115,8 @@ from .models import (
     ProjectOverview,
     ProjectOverviewOptions,
     Provider,
+    ProviderBudgets,
+    ProviderBudgetsUpdate,
     ProviderConnection,
     ProviderDisconnectResult,
     ProviderRate,
@@ -142,6 +143,9 @@ from .models import (
     SitemapMonitor,
     SitemapMonitorListResponse,
     SitemapMonitorPatch,
+    StoredResearchReportOptions,
+    StoredResearchReportResponse,
+    StoredResearchReportsResponse,
     TeamInvite,
     TeamInviteResendResult,
     TeamMember,
@@ -177,7 +181,7 @@ _MISSING = object()
 try:
     SDK_VERSION = version("bisibility")
 except PackageNotFoundError:  # pragma: no cover - source tree without installed metadata
-    SDK_VERSION = "0.10.0"
+    SDK_VERSION = "0.11.0"
 CLIENT_ID = f"bisibility-sdk-python/{SDK_VERSION}"
 AUTH_TOKEN_PREFIXES = ("bsb_key_live_", "bsb_key_test_", "bsb_pat_live_", "mig_")
 
@@ -201,6 +205,13 @@ class RequestOptions:
 
 
 RequestOptionsLike: TypeAlias = RequestOptions | Mapping[str, Any] | None
+ResponseModel: TypeAlias = "type[T] | TypeAdapter[T]"
+
+# A bare union has no ``model_validate``, so the keyword-research response is
+# validated through an adapter instead of a model class.
+_KEYWORD_RESEARCH_RESPONSE: TypeAdapter[KeywordResearchResponse] = TypeAdapter(
+    KeywordResearchResponse
+)
 
 
 def _is_absolute_url(value: str) -> bool:
@@ -249,17 +260,21 @@ def _dump_jsonable(value: Any) -> Any:
 
 def _provider_connect_body(
     value: ConnectProviderInput | Mapping[str, Any] | None,
-) -> tuple[object, int | None]:
+) -> object:
+    """Normalize a connect payload onto the priority-only fallback contract.
+
+    ``priority`` travels with the connect request. The deprecated ``primary=True``
+    still maps to priority ``0``; ``primary=False`` remains a no-op.
+    """
     if value is None:
-        return _MISSING, None
+        return _MISSING
     body = _dump_jsonable(value)
     if not isinstance(body, dict):  # pragma: no cover - constrained by the public signature
-        return body, None
+        return body
     primary = body.pop("primary", None)
-    priority = body.pop("priority", None)
     if primary is True:
-        return body, 0
-    return body, priority
+        body["priority"] = 0
+    return body
 
 
 def _provider_settings_body(value: ProviderSettingsInput | Mapping[str, Any]) -> object:
@@ -967,7 +982,7 @@ class BisibilityClient:
                 "result_limit": filters.get("result_limit"),
                 "seed": filters.get("seed"),
             },
-            response_model=KeywordResearchResponse,
+            response_model=_KEYWORD_RESEARCH_RESPONSE,
             request_options=request_options,
         )
 
@@ -976,11 +991,13 @@ class BisibilityClient:
         project_id: str,
         options: AnalyzeBacklinksOptions | Mapping[str, Any],
         request_options: RequestOptionsLike = None,
-    ) -> DataResponse[BacklinksSnapshot]:
+    ) -> DataResponse[BacklinksOutcome]:
         """Analyze backlinks for a target or return a free estimate.
 
         This operation requires API write scope because a cache miss can spend the
-        project's provider budget. Set ``estimate_only`` for a free dry run.
+        project's provider budget. Set ``estimate_only`` for a free dry run, which
+        answers with a cost-only :class:`BacklinksEstimate` instead of a
+        :class:`BacklinksSnapshot`; use ``isinstance`` to tell them apart.
         """
         filters = _dump_options(options, AnalyzeBacklinksOptions)
         return self._request(
@@ -996,7 +1013,7 @@ class BisibilityClient:
                 "fresh": filters.get("fresh"),
                 "max_cost_cents": filters.get("max_cost_cents"),
             },
-            response_model=DataResponse[BacklinksSnapshot],
+            response_model=DataResponse[BacklinksOutcome],
             request_options=request_options,
         )
 
@@ -1006,7 +1023,10 @@ class BisibilityClient:
         options: LoadMoreBacklinkRowsOptions | Mapping[str, Any],
         request_options: RequestOptionsLike = None,
     ) -> DataResponse[BacklinksSnapshot]:
-        """Load more rows into an unexpired backlinks snapshot."""
+        """Load more rows into an unexpired backlinks snapshot.
+
+        This operation always answers with a snapshot; it has no estimate mode.
+        """
         body = _dump_options(options, LoadMoreBacklinkRowsOptions)
         return self._request(
             "POST",
@@ -1671,6 +1691,67 @@ class BisibilityClient:
             request_options=request_options,
         )
 
+    def list_stored_research_reports(
+        self, project_id: str, request_options: RequestOptionsLike = None
+    ) -> StoredResearchReportsResponse:
+        """Read saved report summaries without starting provider work."""
+        return self._request(
+            "GET",
+            f"/projects/{_encoded_path_segment(project_id, 'prj')}/research/reports",
+            response_model=StoredResearchReportsResponse,
+            request_options=request_options,
+        )
+
+    def get_stored_research_report(
+        self,
+        project_id: str,
+        kind: Literal["backlinks", "domain_overview", "keyword_research"],
+        options: StoredResearchReportOptions | Mapping[str, Any] | None = None,
+        request_options: RequestOptionsLike = None,
+    ) -> StoredResearchReportResponse:
+        """Read a saved report; fresh_until is authoritative for freshness."""
+        return self._request(
+            "GET",
+            (f"/projects/{_encoded_path_segment(project_id, 'prj')}/research/reports/"
+             f"{_encoded_natural_path_segment(kind)}"),
+            query=_dump_options(options, StoredResearchReportOptions),
+            response_model=StoredResearchReportResponse,
+            request_options=request_options,
+        )
+
+    def list_provider_budgets(
+        self, project_id: str, request_options: RequestOptionsLike = None
+    ) -> ListResponse[ProviderBudgets]:
+        """Read the separate own-key and credit budgets of every connection."""
+        return self._request(
+            "GET",
+            f"/projects/{_encoded_path_segment(project_id, 'prj')}/provider-budgets",
+            response_model=ListResponse[ProviderBudgets],
+            request_options=request_options,
+        )
+
+    def update_provider_budgets(
+        self,
+        project_id: str,
+        provider_id: str,
+        input: ProviderBudgetsUpdate | Mapping[str, Any],
+        request_options: RequestOptionsLike = None,
+    ) -> ProviderBudgets:
+        """Omitted fields keep their budget; explicitly set None clears it."""
+        parsed = (
+            input
+            if isinstance(input, ProviderBudgetsUpdate)
+            else ProviderBudgetsUpdate.model_validate(input)
+        )
+        return self._request(
+            "PATCH",
+            (f"/projects/{_encoded_path_segment(project_id, 'prj')}/providers/"
+             f"{_encoded_natural_path_segment(provider_id)}/budgets"),
+            body=_dump_jsonable(parsed),
+            response_model=ProviderBudgets,
+            request_options=request_options,
+        )
+
     def list_providers(
         self,
         project_id: str,
@@ -1693,31 +1774,30 @@ class BisibilityClient:
         input: ConnectProviderInput | Mapping[str, Any] | None = None,
         request_options: RequestOptionsLike = None,
     ) -> ProviderConnection:
+        """Connect a provider to a project and place it in the fallback chain.
+
+        ``priority`` is optional and travels with the connect request. ``0`` promotes
+        the provider and renumbers the chain; any other value reorders it. Omit it to
+        keep a reconnected provider's place and append a new one. The deprecated
+        ``primary=True`` still maps to priority ``0``; ``primary=False`` is a no-op.
+
+        Analytics providers take their credentials in ``credentials``. For Plausible,
+        ``credentials.login`` is the site domain configured in Plausible (its
+        ``site_id``, such as ``example.com``) and defaults to the project domain when
+        omitted, ``credentials.api_key`` is the Stats API token, and
+        ``credentials.endpoint`` points at a self-hosted instance API.
+        """
         path = (
             f"/projects/{_encoded_path_segment(project_id, 'prj')}/providers/"
             f"{_encoded_natural_path_segment(provider_id)}/connect"
         )
-        body, requested_priority = _provider_connect_body(input)
-        connection = self._request(
+        return self._request(
             "POST",
             path,
-            body=body,
+            body=_provider_connect_body(input),
             response_model=ProviderConnection,
             request_options=request_options,
         )
-        if requested_priority is None:
-            return connection
-        try:
-            return self._request(
-                "PATCH",
-                path.removesuffix("/connect"),
-                body={"priority": requested_priority},
-                response_model=ProviderConnection,
-                request_options=request_options,
-                suppress_idempotency_key=True,
-            )
-        except BisibilityError as exc:
-            raise BisibilityProviderPrioritySyncError(connection, exc) from exc
 
     def test_provider_connection(
         self,
@@ -1726,6 +1806,13 @@ class BisibilityClient:
         input: TestProviderConnectionInput | Mapping[str, Any] | None = None,
         request_options: RequestOptionsLike = None,
     ) -> ProviderTestResult:
+        """Probe a provider connection without saving it.
+
+        A successful result reports ``message`` ``"Connected."``, or
+        ``"Connected · <detail>."`` for analytics providers, where the detail names
+        the resolved property or site. Stored credentials fill in whatever the input
+        omits, and Plausible's ``login`` falls back to the project domain.
+        """
         return self._request(
             "POST",
             (
@@ -2421,7 +2508,7 @@ class BisibilityClient:
         parse_as: Literal["text"] | None = None,
         query: QueryParams | None = None,
         request_options: RequestOptionsLike = None,
-        response_model: type[T] | None = None,
+        response_model: ResponseModel[T] | None = None,
         suppress_idempotency_key: bool = False,
     ) -> T:
         options = _coerce_request_options(request_options)
@@ -2525,7 +2612,7 @@ class BisibilityClient:
         response: httpx.Response,
         method: str,
         url: str,
-        response_model: type[T] | None,
+        response_model: ResponseModel[T] | None,
     ) -> T:
         body = response.text
         if not body:
@@ -2546,8 +2633,13 @@ class BisibilityClient:
         if response_model is None:
             return cast(T, parsed)
 
-        validator = getattr(response_model, "model_validate", None)
-        if callable(validator):
+        validator: Callable[[Any], Any] | None
+        if isinstance(response_model, TypeAdapter):
+            validator = response_model.validate_python
+        else:
+            candidate = getattr(response_model, "model_validate", None)
+            validator = candidate if callable(candidate) else None
+        if validator is not None:
             try:
                 return cast(T, validator(parsed))
             except ValidationError as exc:

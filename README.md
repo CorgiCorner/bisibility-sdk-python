@@ -173,16 +173,25 @@ bisibility.create_api_key(
   `get_llms_text`
 - Public cost (no auth): `get_provider_rates`, `get_cost_estimate`
 - Projects: `list_projects`, `get_project`, `update_project`, `delete_project`,
-  `update_project_defaults`
+  `get_project_defaults`, `update_project_defaults`. A defaults patch replaces the
+  schedule fields (`frequency`, `cron_expression`, `jitter_minutes`, `timezone`) as a
+  whole, while `serp_depth` (`10`, `20`, `50`, or `100`) and `serp_stop_on_match` keep
+  their stored value when omitted.
 - API keys: `list_api_keys`, `create_api_key`, `revoke_api_key`
 - Keywords: `list_keywords`, `create_keywords`, `add_keywords`, `get_keyword`,
   `update_keyword`, `set_keyword_target_url`, `delete_keyword`, `bulk_update_keywords`
 - Keyword research: `research_keywords` for one seed and `get_keyword_metrics` for
   batches of up to 700 keywords. Both require API write scope because a cache miss can
   spend provider budget. Pass `estimate_only=True` for a free cache-aware dry run and
-  `max_cost_cents` for a best-effort request guard. Research source diagnostics report
-  `ok`, `failed`, or `skipped`, including a machine-readable reason when applicable.
-  Both methods expose nullable provider metrics, cache metadata, and paid BYO-key cost.
+  `max_cost_cents` for a best-effort request guard. A dry run answers with a cost-only
+  `KeywordResearchEstimate`; every other call answers with a `KeywordResearchResult`.
+  Result source diagnostics report `ok`, `failed`, or `skipped`, including a
+  machine-readable reason when applicable. Both methods expose nullable provider
+  metrics, cache metadata, and paid BYO-key cost.
+- Backlinks: `analyze_backlinks` and `load_more_backlink_rows`. Analyze with
+  `estimate_only=True` for a free dry run that answers with a cost-only
+  `BacklinksEstimate`; every other call answers with a `BacklinksSnapshot`.
+  `load_more_backlink_rows` has no estimate mode and always answers with a snapshot.
 - Domain overview: `analyze_domain_overview`, `load_domain_overview_history`,
   `load_domain_overview_keywords`, and `load_domain_overview_pages`. Analyze with
   `estimate_only=True` before a paid request; every operation that may spend requires an
@@ -195,7 +204,8 @@ bisibility.create_api_key(
   `delete_alert_rule`, `list_triggered_alerts`, `mute_triggered_alert`,
   `mark_project_alerts_read`
 - Rank-history export: `export_rank_history` for typed cursor-paginated JSON or raw CSV text
-- Sitemap monitors: `list_sitemap_monitors`, `update_sitemap_monitor`
+- Sitemap monitors: `list_sitemap_monitors`, `update_sitemap_monitor`. A project has at
+  most one monitor, so a monitor's `id` is its project's id.
 - Team: `list_team_members`, `list_team_invites`, `create_team_invite`,
   `revoke_project_team_invite`, `revoke_team_invite`
 - Providers: `list_providers`, `connect_provider`, `test_provider_connection`,
@@ -311,6 +321,66 @@ report = bisibility.analyze_domain_overview(
 History and additional keyword/page loads use their dedicated option models and also require
 `max_cost_cents`. Cached-only callers can pass `0`; the API returns a problem response instead of
 silently spending when the requested data is not cached.
+
+### Backlinks and keyword-research estimates
+
+`analyze_backlinks` and `research_keywords` can spend the project's connected provider
+account on a cache miss, so both take `estimate_only=True` for a free, cache-aware dry
+run. A dry run answers with a cost-only model that carries no report fields at all, so
+an estimate can never be mistaken for an empty profile or an empty result set. Check
+which one you received with `isinstance`:
+
+```python
+from math import ceil
+
+from bisibility import AnalyzeBacklinksOptions, BacklinksEstimate, BacklinksSnapshot
+
+estimate = bisibility.analyze_backlinks(
+    project_id,
+    AnalyzeBacklinksOptions(target="example.com", target_scope="site", estimate_only=True),
+).data
+if not isinstance(estimate, BacklinksEstimate):
+    raise RuntimeError("Expected a backlinks estimate")
+
+# `cost_cents` is `0` while `cached` is true, and equals `estimated_cost_cents` otherwise.
+snapshot = bisibility.analyze_backlinks(
+    project_id,
+    AnalyzeBacklinksOptions(
+        target="example.com",
+        target_scope="site",
+        max_cost_cents=ceil(estimate.estimated_cost_cents),
+    ),
+).data
+if not isinstance(snapshot, BacklinksSnapshot):
+    raise RuntimeError("Expected a backlinks snapshot")
+print(snapshot.summary.backlinks_total, len(snapshot.rows))
+```
+
+`BacklinksEstimate` carries `target`, `target_scope`, `include_subdomains`, `cached`,
+`cached_until`, `provider`, `cost_cents`, `estimate`, and `estimated_cost_cents`, and
+nothing else. `BacklinksSnapshot` carries the report and no estimate fields.
+`load_more_backlink_rows` always answers with a snapshot.
+
+`research_keywords` works the same way, without the `data` envelope:
+
+```python
+from bisibility import KeywordResearchEstimate, KeywordResearchOptions
+
+response = bisibility.research_keywords(
+    project_id,
+    KeywordResearchOptions(seed="rank tracker", estimate_only=True),
+)
+if isinstance(response, KeywordResearchEstimate):
+    for source in response.sources:
+        print(source.source, source.cost_cents, source.cached)
+else:
+    print(response.total_count, len(response.rows))
+```
+
+A `KeywordResearchEstimate` reports `estimate`, `cached`, `cost_cents`, `provider`,
+`connections`, and one `{source, cost_cents, cached}` entry per planned source. Source
+`status`, `returned`, and `reason` belong to `KeywordResearchResult`, because a dry run
+fetches nothing and so has no source outcome to report.
 
 ### Webhook secret rotation
 
@@ -474,20 +544,29 @@ provider = bisibility.connect_provider(
     ),
 )
 
-# `connect_provider` applies `priority` after connecting. Legacy `primary=True` maps to zero;
-# `primary=False` is a no-op. Failures expose `.connection` in `BisibilityProviderPrioritySyncError`.
-# Self-hosted analytics providers (e.g. "plausible") accept an optional
-# endpoint credential pointing at the instance API.
+# `connect_provider` sends `priority` with the connect request. `0` promotes the provider
+# and renumbers the fallback chain; any other value reorders it. Omit it to keep a
+# reconnected provider's place and append a new one. Legacy `primary=True` maps to zero;
+# `primary=False` is a no-op.
+# For "plausible", `login` is the site domain configured in Plausible (its `site_id`) and
+# defaults to the project domain when omitted, `api_key` is the Stats API token, and the
+# optional `endpoint` points at a self-hosted instance API.
 analytics = bisibility.connect_provider(
     project_id,
     "plausible",
     ConnectProviderInput(
         credentials=ProviderCredentialsInput(
-            api_key="plausible-secret",
+            api_key="plausible-stats-api-token",
+            login="example.com",
             endpoint="https://plausible.example.com/api",
         ),
     ),
 )
+
+# A successful `test_provider_connection` reports "Connected.", or
+# "Connected · <detail>." for analytics providers, where the detail names the
+# resolved property or site.
+print(bisibility.test_provider_connection(project_id, "plausible").message)
 ```
 
 ## Errors
@@ -507,3 +586,19 @@ except BisibilityApiError as error:
 ## License
 
 Licensed under the Apache License, Version 2.0. See [LICENSE](LICENSE) and [NOTICE](NOTICE).
+
+## Saved reports and provider budgets
+
+Saved report reads never invoke a provider. Use `fresh_until` to determine freshness;
+`state` is `fresh` or `stale`, while a domain report keeps its data outcome in `data_state`.
+Own-key and credit budgets are independent. Omit a field to keep it and explicitly clear
+a surface to remove its budget. Credit budgets always use cents.
+
+```python
+saved = client.list_stored_research_reports(project_id)
+report = client.get_stored_research_report(project_id, "keyword_research", {"seed": "example", "result_limit": 100})
+budgets = client.list_provider_budgets(project_id)
+client.update_provider_budgets(project_id, "dataforseo", {"own": {"app": None}, "credits": {"programmatic": {"amount_per_month": 500, "unit": "cents"}}})
+```
+
+The same methods are available with `await` on `AsyncBisibilityClient`.

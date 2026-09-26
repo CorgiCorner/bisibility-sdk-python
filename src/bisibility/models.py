@@ -71,6 +71,8 @@ RankCheckStatus: TypeAlias = Literal["completed", "failed", "running"]
 RankHistoryExportFormat: TypeAlias = Literal["csv", "json"]
 RankHistoryGranularity: TypeAlias = Literal["daily", "weekly"]
 RankHistoryRange: TypeAlias = Literal["30", "90", "all"]
+SerpDepth: TypeAlias = Literal[10, 20, 50, 100]
+BacklinksTargetScope: TypeAlias = Literal["site", "page"]
 ProjectWriteMode: TypeAlias = Literal["active", "migration_hold", "migrated"]
 ProjectOverviewDevice: TypeAlias = Literal["all", "desktop", "mobile"]
 ProjectOverviewRange: TypeAlias = Literal["7d", "28d", "90d"]
@@ -288,7 +290,7 @@ class ProjectDefaults(BisibilityModel):
     location_key: str
     next_check_at: str | None
     project_id: ProjectId
-    serp_depth: Literal[10, 20, 50, 100]
+    serp_depth: SerpDepth
     serp_stop_on_match: bool
     source: Literal["derived", "explicit", "fallback"]
     timezone: str
@@ -296,6 +298,13 @@ class ProjectDefaults(BisibilityModel):
 
 
 class ProjectDefaultsPatch(BisibilityModel):
+    """Partial update for the project keyword defaults.
+
+    The schedule fields (``frequency``, ``cron_expression``, ``jitter_minutes``,
+    ``timezone``) are replaced as a whole. ``serp_depth`` and ``serp_stop_on_match``
+    are independent of the schedule: omitting either keeps its stored value.
+    """
+
     city: str | None = None
     country: str | None = None
     cron_expression: str | None = None
@@ -303,6 +312,7 @@ class ProjectDefaultsPatch(BisibilityModel):
     frequency: RankCheckFrequency | None = None
     jitter_minutes: int | None = None
     location_key: str | None = None
+    serp_depth: SerpDepth | None = None
     serp_stop_on_match: bool | None = None
     timezone: str | None = None
 
@@ -535,16 +545,51 @@ class KeywordResearchSourceResult(BisibilityModel):
     status: KeywordResearchSourceStatus
 
 
-class KeywordResearchResponse(BisibilityModel):
+class KeywordResearchEstimateSource(BisibilityModel):
+    """Per-source cost facts of a keyword-research dry run.
+
+    A dry run never reports ``status``, ``returned``, or ``reason``: nothing was
+    fetched, so there is no source outcome to describe.
+    """
+
+    cached: bool
+    cost_cents: float = Field(ge=0)
+    source: KeywordResearchSource
+
+
+class KeywordResearchEstimate(BisibilityModel):
+    """Free dry run returned for ``estimate_only=True``.
+
+    It carries per-source cost facts only and never ``rows``, ``fetched_at``, or
+    ``total_count``, so it cannot be mistaken for an empty result.
+    """
+
     cached: bool
     connections: list[RankedKeywordConnection]
     cost_cents: float = Field(ge=0)
-    estimate: bool | None = None
+    estimate: Literal[True]
+    provider: str
+    sources: list[KeywordResearchEstimateSource]
+
+
+class KeywordResearchResult(BisibilityModel):
+    """Paid or cached keyword-research result with rows and per-source outcomes."""
+
+    cached: bool
+    connections: list[RankedKeywordConnection]
+    cost_cents: float = Field(ge=0)
     fetched_at: str
     provider: str
     rows: list[KeywordResearchRow]
     sources: list[KeywordResearchSourceResult]
     total_count: int = Field(ge=0)
+
+
+KeywordResearchResponse: TypeAlias = KeywordResearchEstimate | KeywordResearchResult
+"""What ``research_keywords`` returns: an estimate for a dry run, otherwise a result.
+
+Tell the two apart with ``isinstance(response, KeywordResearchEstimate)``.
+"""
 
 
 class BacklinksSummary(BisibilityModel):
@@ -582,12 +627,31 @@ class BacklinkRow(BisibilityModel):
     target_url: str
 
 
+class BacklinksEstimate(BisibilityModel):
+    """Free dry run returned for ``estimate_only=True``.
+
+    It carries cost facts only and never ``summary``, ``history``, ``rows``,
+    ``fetched_at``, ``fetched_row_count``, or ``total_rows_available``, so it
+    cannot be mistaken for an empty backlink profile.
+    """
+
+    cached: bool
+    cached_until: str | None
+    cost_cents: float = Field(ge=0)
+    estimate: Literal[True]
+    estimated_cost_cents: float = Field(ge=0)
+    include_subdomains: bool
+    provider: str
+    target: str
+    target_scope: BacklinksTargetScope
+
+
 class BacklinksSnapshot(BisibilityModel):
+    """Paid or cached backlink profile with summary, history, and rows."""
+
     cached: bool
     cached_until: str
     cost_cents: float = Field(ge=0)
-    estimate: bool | None = None
-    estimated_cost_cents: float | None = Field(default=None, ge=0)
     fetched_at: str
     fetched_row_count: int = Field(ge=0)
     history: list[BacklinksHistoryMonth] = Field(min_length=12, max_length=12)
@@ -596,8 +660,15 @@ class BacklinksSnapshot(BisibilityModel):
     rows: list[BacklinkRow]
     summary: BacklinksSummary
     target: str
-    target_scope: Literal["site", "page"]
+    target_scope: BacklinksTargetScope
     total_rows_available: int = Field(ge=0)
+
+
+BacklinksOutcome: TypeAlias = BacklinksEstimate | BacklinksSnapshot
+"""What ``analyze_backlinks`` returns in ``data``: an estimate for a dry run, otherwise a snapshot.
+
+Tell the two apart with ``isinstance(response.data, BacklinksEstimate)``.
+"""
 
 
 class DomainRankMetrics(BisibilityModel):
@@ -1163,6 +1234,11 @@ class SitemapSnapshotSummary(BisibilityModel):
 
 
 class SitemapMonitor(BisibilityModel):
+    """A project's sitemap monitor.
+
+    A project has at most one monitor, so ``id`` is the project's id.
+    """
+
     enabled: bool
     id: ProjectId
     latest_snapshot: SitemapSnapshotSummary | None
@@ -1927,7 +2003,7 @@ class KeywordResearchOptions(BisibilityModel):
 
 class AnalyzeBacklinksOptions(BisibilityModel):
     target: str
-    target_scope: Literal["site", "page"] | None = None
+    target_scope: BacklinksTargetScope | None = None
     include_subdomains: bool | None = None
     result_limit: Literal[100, 300, 500, 1000] | None = None
     mode: Literal["as_is", "one_per_domain"] | None = None
@@ -1938,7 +2014,7 @@ class AnalyzeBacklinksOptions(BisibilityModel):
 
 class LoadMoreBacklinkRowsOptions(BisibilityModel):
     target: str
-    target_scope: Literal["site", "page"]
+    target_scope: BacklinksTargetScope
     include_subdomains: bool
     limit: int = Field(ge=100, le=1000, multiple_of=100)
 
@@ -2067,3 +2143,216 @@ class ListSignalsOptions(PaginationOptions):
     source: SignalSource | None = None
     to: str | date | datetime | None = None
     type: str | None = None
+
+
+class StoredBacklinksReport(BacklinksSnapshot):
+    fresh_until: str
+    saved_at: str
+    stale: bool
+    state: Literal["fresh", "stale"]
+
+
+class StoredDomainOverviewReport(BisibilityModel):
+    cached: bool
+    cost_cents: float = Field(ge=0)
+    country_code: str | None
+    data_state: Literal["no_data", "ok", "partial"]
+    fetched_at: str
+    fresh_until: str
+    history: list[DomainOverviewHistoricalRow] | None
+    keywords: DomainOverviewRankedKeywordsPage | None
+    language_code: str
+    location_code: int
+    overview: DomainRankMetrics | None
+    pages: DomainOverviewRelevantPages | None
+    partial: bool
+    previous_fetched_at: str | None
+    previous_overview: DomainRankMetrics | None
+    previous_source_snapshot_at: str | None
+    provider: str
+    saved_at: str
+    scope: Literal["root", "subdomain"]
+    source_snapshot_at: str | None
+    stale: bool
+    state: Literal["fresh", "stale"]
+    target: str
+
+
+class StoredKeywordResearchReportRowsItemMonthlyTrendItem(BisibilityModel):
+    month: int = Field(ge=1, le=12)
+    search_volume: float | None
+    year: int
+
+
+class StoredKeywordResearchReportRowsItem(BisibilityModel):
+    already_saved: bool
+    already_tracked: bool
+    competition: float | None = Field(ge=0, le=1)
+    cpc_cents: int | None = Field(ge=0)
+    difficulty: int | None = Field(ge=0, le=100)
+    intent: Literal["informational", "commercial", "transactional", "navigational", "unknown", None]
+    keyword: str
+    monthly_trend: list[StoredKeywordResearchReportRowsItemMonthlyTrendItem]
+    search_volume: float | None = Field(ge=0)
+    source: Literal["related", "suggestion", "idea"]
+
+
+class StoredKeywordResearchReportSourcesItem(BisibilityModel):
+    cached: bool
+    cost_cents: float = Field(ge=0)
+    reason: (
+        Literal[
+            "budget_exhausted",
+            "cost_limit",
+            "in_progress",
+            "needs_reauth",
+            "no_source",
+            "previous_source_failed",
+            "provider_error",
+            "rate_limited",
+            "result_limit",
+            "unsupported_location",
+        ]
+        | None
+    ) = Field(default=None)
+    returned: int = Field(ge=0)
+    source: Literal["related", "suggestion", "idea"]
+    status: Literal["ok", "failed", "skipped"]
+
+
+class StoredKeywordResearchReport(BisibilityModel):
+    cached: bool
+    cost_cents: float = Field(ge=0)
+    country_code: str
+    fetched_at: str
+    fresh_until: str
+    include_clickstream: bool
+    language_code: str
+    mode: str
+    partial: bool
+    provider: str
+    request_key: str
+    result_limit: int = Field(ge=1)
+    rows: list[StoredKeywordResearchReportRowsItem]
+    saved_at: str
+    seed: str
+    sources: list[StoredKeywordResearchReportSourcesItem]
+    stale: bool
+    state: Literal["fresh", "stale"]
+
+
+class StoredResearchReportSummary(BisibilityModel):
+    country_code: str | None = Field(default=None)
+    fresh_until: str
+    include_clickstream: bool | None = Field(default=None)
+    include_subdomains: bool | None = Field(default=None)
+    kind: Literal["backlinks", "domain_overview", "keyword_research"]
+    language_code: str | None = Field(default=None)
+    location_code: int | None = Field(default=None)
+    mode: str | None = Field(default=None)
+    result_limit: int | None = Field(default=None)
+    saved_at: str
+    seed: str | None = Field(default=None)
+    state: Literal["fresh", "stale"]
+    target: str | None = Field(default=None)
+    target_scope: str | None = Field(default=None)
+
+
+class StoredResearchReportsResponseMeta(BisibilityModel):
+    freshness_days: int
+
+
+class StoredResearchReportsResponse(BisibilityModel):
+    data: list[StoredResearchReportSummary]
+    meta: StoredResearchReportsResponseMeta
+
+
+class StoredResearchReportResponse(BisibilityModel):
+    data: StoredBacklinksReport | StoredDomainOverviewReport | StoredKeywordResearchReport
+
+
+class ProviderBudgetsCreditsApp(BisibilityModel):
+    amount_per_month: int = Field(ge=1, le=2147483647)
+    unit: Literal["cents"]
+
+
+class ProviderBudgetsCreditsProgrammatic(BisibilityModel):
+    amount_per_month: int = Field(ge=1, le=2147483647)
+    unit: Literal["cents"]
+
+
+class ProviderBudgetsCredits(BisibilityModel):
+    app: ProviderBudgetsCreditsApp | None
+    programmatic: ProviderBudgetsCreditsProgrammatic | None
+
+
+class ProviderBudgetsOwnApp(BisibilityModel):
+    amount_per_month: int = Field(ge=1, le=2147483647)
+    unit: Literal["cents", "units"]
+
+
+class ProviderBudgetsOwnProgrammatic(BisibilityModel):
+    amount_per_month: int = Field(ge=1, le=2147483647)
+    unit: Literal["cents", "units"]
+
+
+class ProviderBudgetsOwn(BisibilityModel):
+    app: ProviderBudgetsOwnApp | None
+    programmatic: ProviderBudgetsOwnProgrammatic | None
+
+
+class ProviderBudgets(BisibilityModel):
+    connection_id: str
+    credential_source: Literal["own", "hosted"]
+    credits: ProviderBudgetsCredits
+    own: ProviderBudgetsOwn
+    provider: str
+    source: Literal["connection", "legacy_project", "none"]
+
+
+class ProviderBudgetsUpdateCreditsApp(BisibilityModel):
+    amount_per_month: int = Field(ge=1, le=2147483647)
+    unit: Literal["cents"]
+
+
+class ProviderBudgetsUpdateCreditsProgrammatic(BisibilityModel):
+    amount_per_month: int = Field(ge=1, le=2147483647)
+    unit: Literal["cents"]
+
+
+class ProviderBudgetsUpdateCredits(BisibilityModel):
+    app: ProviderBudgetsUpdateCreditsApp | None = Field(default=None)
+    programmatic: ProviderBudgetsUpdateCreditsProgrammatic | None = Field(default=None)
+
+
+class ProviderBudgetsUpdateOwnApp(BisibilityModel):
+    amount_per_month: int = Field(ge=1, le=2147483647)
+    unit: Literal["cents", "units"]
+
+
+class ProviderBudgetsUpdateOwnProgrammatic(BisibilityModel):
+    amount_per_month: int = Field(ge=1, le=2147483647)
+    unit: Literal["cents", "units"]
+
+
+class ProviderBudgetsUpdateOwn(BisibilityModel):
+    app: ProviderBudgetsUpdateOwnApp | None = Field(default=None)
+    programmatic: ProviderBudgetsUpdateOwnProgrammatic | None = Field(default=None)
+
+
+class ProviderBudgetsUpdate(BisibilityModel):
+    credits: ProviderBudgetsUpdateCredits | None = Field(default=None)
+    own: ProviderBudgetsUpdateOwn | None = Field(default=None)
+
+
+class StoredResearchReportOptions(BisibilityModel):
+    target: str | None = None
+    target_scope: str | None = None
+    mode: str | None = None
+    include_subdomains: bool | None = None
+    seed: str | None = None
+    include_clickstream: bool | None = None
+    result_limit: Literal[100, 300, 500] | None = None
+    connection_id: ConnectionId | None = None
+    language_code: str | None = None
+    location_code: int | None = None

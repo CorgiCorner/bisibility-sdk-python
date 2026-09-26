@@ -21,28 +21,24 @@ from .client import (
     BisibilityClient,
     QueryParams,
     RequestOptionsLike,
+    ResponseModel,
     _backoff_seconds,
     _coerce_request_options,
     _dump_jsonable,
     _dump_options,
-    _encoded_natural_path_segment,
     _encoded_path_segment,
     _normalize_base_url,
-    _provider_connect_body,
     _retry_after_seconds,
     _UnsetTimeout,
 )
 from .errors import (
     BisibilityConfigurationError,
-    BisibilityError,
     BisibilityNetworkError,
-    BisibilityProviderPrioritySyncError,
 )
 from .models import (
     AlertRule,
     ApiKey,
     Competitor,
-    ConnectProviderInput,
     Keyword,
     ListKeywordsOptions,
     ListMigrationTokensResponse,
@@ -51,7 +47,6 @@ from .models import (
     MigrationToken,
     PaginationOptions,
     Provider,
-    ProviderConnection,
     RankCheck,
     SavedKeyword,
     SavedView,
@@ -140,39 +135,10 @@ class AsyncBisibilityClient(BisibilityClient):
     def __exit__(self, exc_type: object, exc_value: object, traceback: object) -> None:
         return None
 
-    async def connect_provider(  # type: ignore[override]
-        self,
-        project_id: str,
-        provider_id: str,
-        input: ConnectProviderInput | Mapping[str, Any] | None = None,
-        request_options: RequestOptionsLike = None,
-    ) -> ProviderConnection:
-        path = (
-            f"/projects/{_encoded_path_segment(project_id, 'prj')}/providers/"
-            f"{_encoded_natural_path_segment(provider_id)}/connect"
-        )
-        body, requested_priority = _provider_connect_body(input)
-        connection = await self._request(
-            "POST",
-            path,
-            body=body,
-            response_model=ProviderConnection,
-            request_options=request_options,
-        )
-        if requested_priority is None:
-            return connection
-        try:
-            return await self._request(
-                "PATCH",
-                path.removesuffix("/connect"),
-                body={"priority": requested_priority},
-                response_model=ProviderConnection,
-                request_options=request_options,
-                suppress_idempotency_key=True,
-            )
-        except BisibilityError as exc:
-            raise BisibilityProviderPrioritySyncError(connection, exc) from exc
-
+    list_stored_research_reports = _asyncify(BisibilityClient.list_stored_research_reports)  # type: ignore[assignment]
+    get_stored_research_report = _asyncify(BisibilityClient.get_stored_research_report)  # type: ignore[assignment]
+    list_provider_budgets = _asyncify(BisibilityClient.list_provider_budgets)  # type: ignore[assignment]
+    update_provider_budgets = _asyncify(BisibilityClient.update_provider_budgets)  # type: ignore[assignment]
     get_health = _asyncify(BisibilityClient.get_health)  # type: ignore[assignment]
     get_liveness = _asyncify(BisibilityClient.get_liveness)  # type: ignore[assignment]
     get_readiness = _asyncify(BisibilityClient.get_readiness)  # type: ignore[assignment]
@@ -272,6 +238,7 @@ class AsyncBisibilityClient(BisibilityClient):
     )
     revoke_team_invite = _asyncify(BisibilityClient.revoke_team_invite)  # type: ignore[assignment]
     list_providers = _asyncify(BisibilityClient.list_providers)  # type: ignore[assignment]
+    connect_provider = _asyncify(BisibilityClient.connect_provider)  # type: ignore[assignment]
     test_provider_connection = _asyncify(  # type: ignore[assignment]
         BisibilityClient.test_provider_connection
     )
@@ -547,7 +514,7 @@ class AsyncBisibilityClient(BisibilityClient):
         parse_as: Literal["text"] | None = None,
         query: QueryParams | None = None,
         request_options: RequestOptionsLike = None,
-        response_model: type[T] | None = None,
+        response_model: ResponseModel[T] | None = None,
         suppress_idempotency_key: bool = False,
     ) -> T:
         options = _coerce_request_options(request_options)

@@ -128,14 +128,9 @@ def test_async_factory_request_headers_timeout_and_owned_lifecycle() -> None:
     }
 
 
-def test_async_connect_provider_applies_priority_in_two_steps() -> None:
+def test_async_connect_provider_sends_priority_with_the_connect_request() -> None:
     requests: list[httpx.Request] = []
-    responses = iter(
-        [
-            httpx.Response(201, json=provider_connection()),
-            httpx.Response(200, json=provider_connection(is_primary=True, priority=0)),
-        ]
-    )
+    responses = iter([httpx.Response(201, json=provider_connection(is_primary=True, priority=0))])
 
     def handler(request: httpx.Request) -> httpx.Response:
         requests.append(request)
@@ -160,14 +155,12 @@ def test_async_connect_provider_applies_priority_in_two_steps() -> None:
             assert connection.priority == 0
 
     asyncio.run(scenario())
+    assert len(requests) == 1
     assert httpx.Response(200, request=requests[0], content=requests[0].content).json() == {
-        "credentials": {"api_key": "secret"}
-    }
-    assert httpx.Response(200, request=requests[1], content=requests[1].content).json() == {
-        "priority": 0
+        "credentials": {"api_key": "secret"},
+        "priority": 0,
     }
     assert requests[0].headers["Idempotency-Key"] == "connect-once"
-    assert "Idempotency-Key" not in requests[1].headers
 
 
 def test_async_iterator_preserves_filters_across_cursor_pages() -> None:

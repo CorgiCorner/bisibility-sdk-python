@@ -23,7 +23,12 @@ class BisibilityError(Exception):
 
 
 class BisibilityProviderPrioritySyncError(BisibilityError):
-    """A provider connected successfully but its requested priority did not apply."""
+    """A provider connected successfully but its requested priority did not apply.
+
+    Deprecated and no longer raised: ``connect_provider`` sends ``priority`` in the
+    connect request itself, so a rejected priority fails the connect outright with
+    :class:`BisibilityApiError`. Kept exported for import compatibility.
+    """
 
     connection: ProviderConnection
     cause: BisibilityError

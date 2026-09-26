@@ -16,6 +16,8 @@ from bisibility import (
     AlertRuleInput,
     AnalyzeBacklinksOptions,
     ApiKeyCreateInput,
+    BacklinksEstimate,
+    BacklinksSnapshot,
     BisibilityApiError,
     BisibilityClient,
     BisibilityConfigurationError,
@@ -44,7 +46,9 @@ from bisibility import (
     KeywordMatchRequest,
     KeywordMatchResponse,
     KeywordMetricsInput,
+    KeywordResearchEstimate,
     KeywordResearchOptions,
+    KeywordResearchResult,
     KeywordSchedule,
     KeywordScheduleInput,
     ListKeywordsOptions,
@@ -824,6 +828,22 @@ def backlinks_snapshot(**overrides: Any) -> dict[str, Any]:
     }
 
 
+def backlinks_estimate(**overrides: Any) -> dict[str, Any]:
+    """Cost-only dry run: no summary, history, rows, or fetch metadata."""
+    return {
+        "cached": False,
+        "cached_until": None,
+        "cost_cents": 7,
+        "estimate": True,
+        "estimated_cost_cents": 7,
+        "include_subdomains": True,
+        "provider": "dataforseo",
+        "target": "acme-store.com",
+        "target_scope": "site",
+        **overrides,
+    }
+
+
 def test_discovery_methods_do_not_require_auth() -> None:
     capability = {
         "description": "Add one or more keywords",
@@ -1317,6 +1337,7 @@ def test_project_defaults_and_keyword_schedule_models_match_openapi_field_sets()
         "frequency",
         "jitter_minutes",
         "location_key",
+        "serp_depth",
         "serp_stop_on_match",
         "timezone",
     }
@@ -1356,8 +1377,8 @@ def test_sends_bearer_auth_and_default_headers_on_protected_requests() -> None:
     assert request.headers["Authorization"] == f"Bearer {API_KEY}"
     assert request.headers["X-Client"] == "sdk-test"
     assert request.headers["X-Request"] == "request"
-    assert request.headers["User-Agent"] == "bisibility-sdk-python/0.10.0"
-    assert request.headers["X-Bisibility-Client"] == "bisibility-sdk-python/0.10.0"
+    assert request.headers["User-Agent"] == "bisibility-sdk-python/0.11.0"
+    assert request.headers["X-Bisibility-Client"] == "bisibility-sdk-python/0.11.0"
     assert request.headers["X-Bisibility-Source"] == "sdk"
     assert request.extensions["timeout"] == {
         "connect": 30.0,
@@ -1375,7 +1396,7 @@ def test_preserves_user_agent_and_allows_disabling_timeout() -> None:
 
     request = queue.requests[-1]
     assert request.headers["User-Agent"] == "my-app/1.0"
-    assert request.headers["X-Bisibility-Client"] == "bisibility-sdk-python/0.10.0"
+    assert request.headers["X-Bisibility-Client"] == "bisibility-sdk-python/0.11.0"
     assert request.headers["X-Bisibility-Source"] == "cli"
     assert request.extensions["timeout"] == {
         "connect": None,
@@ -1846,6 +1867,48 @@ def test_updates_project_defaults() -> None:
         "timezone": "UTC",
     }
     assert request_json(queue.requests[1]) == {"location_key": "US/Texas/Austin"}
+
+
+def test_update_project_defaults_sends_serp_depth_only_when_set() -> None:
+    queue = QueueTransport(
+        [
+            json_response(project_defaults(serp_depth=50)),
+            json_response(project_defaults(serp_depth=100)),
+            json_response(project_defaults()),
+        ]
+    )
+    client = make_client(queue)
+
+    assert (
+        client.update_project_defaults(
+            "prj_a00000000000000000000000", ProjectDefaultsPatch(serp_depth=50)
+        ).serp_depth
+        == 50
+    )
+    assert (
+        client.update_project_defaults(
+            "prj_a00000000000000000000000", {"serp_depth": 100, "serp_stop_on_match": False}
+        ).serp_depth
+        == 100
+    )
+    # An omitted depth keeps the stored value, so it must stay out of the request body.
+    client.update_project_defaults(
+        "prj_a00000000000000000000000", ProjectDefaultsPatch(frequency="daily")
+    )
+
+    assert request_json(queue.requests[0]) == {"serp_depth": 50}
+    assert request_json(queue.requests[1]) == {"serp_depth": 100, "serp_stop_on_match": False}
+    assert request_json(queue.requests[2]) == {"frequency": "daily"}
+
+
+def test_update_project_defaults_rejects_an_unsupported_serp_depth() -> None:
+    with pytest.raises(ValidationError):
+        ProjectDefaultsPatch(serp_depth=30)  # type: ignore[arg-type]
+
+
+def test_provider_priority_sync_error_stays_exported_for_compatibility() -> None:
+    # Deprecated and no longer raised: connect_provider sends priority in one request.
+    assert issubclass(BisibilityProviderPrioritySyncError, BisibilityError)
 
 
 def test_gets_project_defaults() -> None:
@@ -2360,8 +2423,11 @@ def test_researches_keywords_with_partial_source_diagnostics_and_cost_options() 
         ),
     )
 
+    assert isinstance(result, KeywordResearchResult)
+    assert not isinstance(result, KeywordResearchEstimate)
     assert result.cached is False
     assert result.provider == "DataForSEO"
+    assert result.total_count == 1
     assert result.rows[0].source == "related"
     assert result.rows[0].already_tracked is True
     assert result.rows[0].difficulty is None
@@ -2371,6 +2437,7 @@ def test_researches_keywords_with_partial_source_diagnostics_and_cost_options() 
     assert result.sources[1].reason == "budget_exhausted"
     assert result.sources[2].status == "skipped"
     assert result.sources[2].reason == "previous_source_failed"
+    assert not hasattr(result, "estimate")
     assert str(queue.requests[-1].url) == (
         "https://api.test/api/v1/projects/prj_a00000000000000000000000/keyword-research?"
         "connection_id=conn_d00000000000000000000000&estimate_only=false&fresh=true&include_clickstream=true&"
@@ -2391,28 +2458,13 @@ def test_maps_keyword_research_estimate_response() -> None:
                             "provider": "dataforseo",
                         }
                     ],
-                    "cost_cents": 0,
+                    "cost_cents": 1.01,
                     "estimate": True,
-                    "fetched_at": "2026-07-22T10:00:00.000Z",
                     "provider": "DataForSEO",
-                    "rows": [],
                     "sources": [
-                        {
-                            "cached": True,
-                            "cost_cents": 0,
-                            "returned": 0,
-                            "source": "related",
-                            "status": "ok",
-                        },
-                        {
-                            "cached": False,
-                            "cost_cents": 1.01,
-                            "returned": 0,
-                            "source": "suggestion",
-                            "status": "ok",
-                        },
+                        {"cached": True, "cost_cents": 0, "source": "related"},
+                        {"cached": False, "cost_cents": 1.01, "source": "suggestion"},
                     ],
-                    "total_count": 0,
                 }
             )
         ]
@@ -2424,10 +2476,18 @@ def test_maps_keyword_research_estimate_response() -> None:
         KeywordResearchOptions(estimate_only=True, seed="rank tracker"),
     )
 
+    assert isinstance(result, KeywordResearchEstimate)
+    assert not isinstance(result, KeywordResearchResult)
     assert result.estimate is True
-    assert result.rows == []
+    assert result.cost_cents == 1.01
+    assert result.connections[0].id == "conn_d00000000000000000000000"
+    assert result.sources[0].source == "related"
     assert result.sources[0].cached is True
     assert result.sources[1].cost_cents == 1.01
+    for absent in ("rows", "fetched_at", "total_count"):
+        assert not hasattr(result, absent)
+    assert not hasattr(result.sources[0], "status")
+    assert not hasattr(result.sources[0], "returned")
     assert str(queue.requests[-1].url).endswith(
         "/projects/prj_a00000000000000000000000/keyword-research?estimate_only=true&seed=rank+tracker"
     )
@@ -2451,19 +2511,77 @@ def test_analyzes_backlinks_with_all_query_options() -> None:
         ),
     )
 
-    assert result.data.summary.backlinks_total == 1685
-    assert result.data.rows[0].flags == ["nofollow", "ugc"]
-    assert result.data.rows[0].domain_authority == 91
-    assert result.data.rows[0].spam_score == 2.0
-    assert result.data.rows[0].links_count == 6
-    assert result.data.rows[0].first_seen.isoformat() == "2026-01-21"
-    assert result.data.rows[0].lost_at is None
-    assert result.data.rows[0].status == "active"
+    snapshot = result.data
+    assert isinstance(snapshot, BacklinksSnapshot)
+    assert snapshot.summary.backlinks_total == 1685
+    assert snapshot.rows[0].flags == ["nofollow", "ugc"]
+    assert snapshot.rows[0].domain_authority == 91
+    assert snapshot.rows[0].spam_score == 2.0
+    assert snapshot.rows[0].links_count == 6
+    assert snapshot.rows[0].first_seen.isoformat() == "2026-01-21"
+    assert snapshot.rows[0].lost_at is None
+    assert snapshot.rows[0].status == "active"
     assert str(queue.requests[-1].url) == (
         "https://api.test/api/v1/projects/prj_a00000000000000000000000/backlinks?"
         "target=acme-store.com&target_scope=site&include_subdomains=true&result_limit=1000&"
         "mode=one_per_domain&estimate_only=false&fresh=true&max_cost_cents=9"
     )
+
+
+def test_analyze_backlinks_estimate_only_returns_a_cost_only_estimate() -> None:
+    queue = QueueTransport([json_response({"data": backlinks_estimate()})])
+    client = make_client(queue)
+
+    result = client.analyze_backlinks(
+        "prj_a00000000000000000000000",
+        AnalyzeBacklinksOptions(target="acme-store.com", estimate_only=True),
+    )
+
+    estimate = result.data
+    assert isinstance(estimate, BacklinksEstimate)
+    assert not isinstance(estimate, BacklinksSnapshot)
+    assert estimate.estimate is True
+    assert estimate.estimated_cost_cents == 7
+    assert estimate.cost_cents == 7
+    assert estimate.cached_until is None
+    assert estimate.target_scope == "site"
+    for absent in (
+        "summary",
+        "history",
+        "rows",
+        "fetched_at",
+        "fetched_row_count",
+        "total_rows_available",
+    ):
+        assert not hasattr(estimate, absent)
+
+
+def test_analyze_backlinks_estimate_reports_a_cached_snapshot_as_free() -> None:
+    queue = QueueTransport(
+        [
+            json_response(
+                {
+                    "data": backlinks_estimate(
+                        cached=True,
+                        cached_until="2026-09-22T15:00:00Z",
+                        cost_cents=0,
+                    )
+                }
+            )
+        ]
+    )
+    client = make_client(queue)
+
+    estimate = client.analyze_backlinks(
+        "prj_a00000000000000000000000",
+        AnalyzeBacklinksOptions(target="acme-store.com", estimate_only=True),
+    ).data
+
+    assert isinstance(estimate, BacklinksEstimate)
+    assert estimate.cached is True
+    assert estimate.cost_cents == 0
+    assert estimate.estimated_cost_cents == 7
+    assert estimate.cached_until == "2026-09-22T15:00:00Z"
 
 
 def test_analyze_backlinks_omits_unspecified_query_options() -> None:
@@ -2504,8 +2622,10 @@ def test_loads_more_backlink_rows_with_snake_case_body() -> None:
         ),
     )
 
-    assert result.data.cost_cents == 1
-    assert result.data.fetched_row_count == 200
+    snapshot = result.data
+    assert isinstance(snapshot, BacklinksSnapshot)
+    assert snapshot.cost_cents == 1
+    assert snapshot.fetched_row_count == 200
     assert queue.requests[-1].method == "POST"
     assert str(queue.requests[-1].url) == (
         "https://api.test/api/v1/projects/prj_a00000000000000000000000/backlinks/rows"
@@ -3541,11 +3661,13 @@ def test_provider_methods_and_settings_helpers() -> None:
     queue = QueueTransport(
         [
             json_response(list_response([provider()])),
-            json_response(provider_connection(id="conn_b00000000000000000000000"), 201),
             json_response(
-                provider_connection(id="conn_b00000000000000000000000", is_primary=True, priority=0)
+                provider_connection(
+                    id="conn_b00000000000000000000000", is_primary=True, priority=0
+                ),
+                201,
             ),
-            json_response({"balance": 42, "message": "Provider ready", "ok": True}),
+            json_response({"balance": 42, "message": "Connected.", "ok": True}),
             json_response(provider_connection(enabled=False, priority=20)),
             json_response(provider_connection(enabled=True)),
             json_response(provider_connection(priority=5)),
@@ -3599,27 +3721,77 @@ def test_provider_methods_and_settings_helpers() -> None:
     assert request_json(queue.requests[1]) == {
         "cost_per_check": 0.01,
         "credentials": {"api_key": "secret"},
+        "priority": 0,
     }
-    assert request_json(queue.requests[2]) == {"priority": 0}
-    assert str(queue.requests[3].url) == (
+    assert str(queue.requests[2].url) == (
         "https://api.test/api/v1/projects/prj_a00000000000000000000000/providers/serpapi/test"
     )
-    assert request_json(queue.requests[3]) == {"credentials": {"api_key": "secret"}}
-    assert request_json(queue.requests[4]) == {"enabled": False, "priority": 20}
-    assert request_json(queue.requests[5]) == {"enabled": True}
-    assert request_json(queue.requests[6]) == {"priority": 5}
-    assert request_json(queue.requests[7]) == {"priority": 0}
-    assert request_json(queue.requests[8]) == {}
-    assert queue.requests[9].method == "DELETE"
+    assert request_json(queue.requests[2]) == {"credentials": {"api_key": "secret"}}
+    assert request_json(queue.requests[3]) == {"enabled": False, "priority": 20}
+    assert request_json(queue.requests[4]) == {"enabled": True}
+    assert request_json(queue.requests[5]) == {"priority": 5}
+    assert request_json(queue.requests[6]) == {"priority": 0}
+    assert request_json(queue.requests[7]) == {}
+    assert queue.requests[8].method == "DELETE"
 
 
-def test_connect_provider_applies_explicit_priority_after_connect_without_key_reuse() -> None:
+def test_test_provider_connection_reports_the_current_success_messages() -> None:
     queue = QueueTransport(
         [
-            json_response(provider_connection(), 201),
-            json_response(provider_connection(priority=7)),
+            json_response({"balance": 42, "message": "Connected.", "ok": True}),
+            json_response(
+                {"message": "Connected \u00b7 sc-domain:example.com (siteOwner).", "ok": True}
+            ),
         ]
     )
+    client = make_client(queue)
+
+    serp = client.test_provider_connection("prj_a00000000000000000000000", "dataforseo")
+    analytics = client.test_provider_connection(
+        "prj_a00000000000000000000000",
+        "gsc",
+        {"credentials": {"login": "example.com"}},
+    )
+
+    assert serp.ok is True
+    assert serp.message == "Connected."
+    assert serp.balance == 42
+    assert analytics.ok is True
+    assert analytics.message == "Connected \u00b7 sc-domain:example.com (siteOwner)."
+    assert analytics.balance is None
+
+
+def test_connects_plausible_with_the_site_domain_as_login() -> None:
+    queue = QueueTransport(
+        [
+            json_response(
+                provider_connection(
+                    id="conn_c00000000000000000000000", kind="analytics", provider="plausible"
+                ),
+                201,
+            )
+        ]
+    )
+    client = make_client(queue)
+
+    # Plausible's login is the Plausible site_id; the API defaults it to the project
+    # domain when it is omitted.
+    connection = client.connect_provider(
+        "prj_a00000000000000000000000",
+        "plausible",
+        ConnectProviderInput(
+            credentials=ProviderCredentialsInput(api_key="stats-api-token", login="example.com"),
+        ),
+    )
+
+    assert connection.provider == "plausible"
+    assert request_json(queue.requests[0]) == {
+        "credentials": {"api_key": "stats-api-token", "login": "example.com"}
+    }
+
+
+def test_connect_provider_sends_explicit_priority_in_one_request() -> None:
+    queue = QueueTransport([json_response(provider_connection(priority=7), 201)])
     client = make_client(queue)
 
     connection = client.connect_provider(
@@ -3637,32 +3809,57 @@ def test_connect_provider_applies_explicit_priority_after_connect_without_key_re
     )
 
     assert connection.priority == 7
-    assert request_json(queue.requests[0]) == {"credentials": {"api_key": "secret"}}
-    assert request_json(queue.requests[1]) == {"priority": 7}
+    assert len(queue.requests) == 1
+    assert request_json(queue.requests[0]) == {
+        "credentials": {"api_key": "secret"},
+        "priority": 7,
+    }
     assert queue.requests[0].headers["Idempotency-Key"] == "connect-once"
-    assert "Idempotency-Key" not in queue.requests[1].headers
-    assert queue.requests[1].headers["X-Request-Trace"] == "provider-connect"
+    assert queue.requests[0].headers["X-Request-Trace"] == "provider-connect"
 
 
-def test_connect_provider_exposes_connection_when_priority_follow_up_fails() -> None:
-    queue = QueueTransport(
-        [
-            json_response(provider_connection(id="conn_b00000000000000000000000"), 201),
-            json_response({"detail": "Priority update failed."}, 500),
-        ]
-    )
+def test_connect_provider_omits_priority_to_keep_the_stored_fallback_place() -> None:
+    queue = QueueTransport([json_response(provider_connection(priority=3), 201)])
     client = make_client(queue)
 
-    with pytest.raises(BisibilityProviderPrioritySyncError) as raised:
+    connection = client.connect_provider(
+        "prj_a00000000000000000000000",
+        "serpapi",
+        {"credentials": {"api_key": "secret"}},
+    )
+
+    assert connection.priority == 3
+    assert request_json(queue.requests[0]) == {"credentials": {"api_key": "secret"}}
+
+
+def test_connect_provider_maps_deprecated_primary_to_priority_zero() -> None:
+    queue = QueueTransport([json_response(provider_connection(is_primary=True, priority=0), 201)])
+    client = make_client(queue)
+
+    connection = client.connect_provider(
+        "prj_a00000000000000000000000",
+        "serpapi",
+        {"primary": True},
+    )
+
+    assert connection.priority == 0
+    assert len(queue.requests) == 1
+    assert request_json(queue.requests[0]) == {"priority": 0}
+
+
+def test_connect_provider_raises_the_api_error_when_the_priority_is_rejected() -> None:
+    queue = QueueTransport([json_response({"detail": "priority must be 0..1000."}, 400)])
+    client = make_client(queue)
+
+    with pytest.raises(BisibilityApiError) as raised:
         client.connect_provider(
             "prj_a00000000000000000000000",
             "serpapi",
-            {"primary": True},
+            {"priority": 5000},
         )
 
-    assert raised.value.connection.id == "conn_b00000000000000000000000"
-    assert isinstance(raised.value.cause, BisibilityApiError)
-    assert len(queue.requests) == 2
+    assert raised.value.status == 400
+    assert len(queue.requests) == 1
 
 
 def test_connects_plausible_provider_with_endpoint_credential() -> None:
