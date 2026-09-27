@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.11.1 - 2026-09-27
+
+- Replaced the stale README version label with a link to the current package registry release.
+
 ## 0.11.0 - 2026-09-27
 
 - Added saved research report reads and separate own-key and credit provider budget methods.

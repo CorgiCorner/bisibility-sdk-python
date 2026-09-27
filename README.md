@@ -8,7 +8,7 @@
 > [API reference](https://bisibility.com/docs/api/overview) ·
 > [Roadmap](https://bisibility.com/roadmap)
 >
-> **Status:** Published on PyPI as v0.10.0.
+> Current versions are listed on [PyPI](https://pypi.org/project/bisibility/).
 
 Python SDK for the Bisibility REST API.
 
