@@ -26,6 +26,7 @@ from bisibility import (
     BisibilityProviderPrioritySyncError,
     BisibilityResponseError,
     BisibilityTimeoutError,
+    CloudImportCompatibility,
     CloudImportFinalizeResponse,
     CloudImportPackage,
     CloudImportSessionCreate,
@@ -125,7 +126,7 @@ def project(**overrides: Any) -> dict[str, Any]:
 
 def cloud_import_package(**overrides: Any) -> dict[str, Any]:
     package: dict[str, Any] = {
-        "version": 5,
+        "version": 7,
         "project_id": "prj_a00000000000000000000000",
         "keywords": [
             {
@@ -133,9 +134,13 @@ def cloud_import_package(**overrides: Any) -> dict[str, Any]:
                 "keyword": "rank tracker api",
                 "device": "desktop",
                 "location": "United States",
+                "location_key": "US",
                 "rankingHistory": [
                     {
                         "checkedAt": "2026-07-27T12:00:00Z",
+                        "normalizationVersion": "v2",
+                        "provider": "serpapi",
+                        "requestedDepth": 20,
                         "position": 3,
                         "previousPosition": 4,
                         "rankingUrl": "https://example.com/rank-tracker",
@@ -1021,6 +1026,7 @@ def test_searches_canonical_locations() -> None:
 
 def test_public_id_registry_and_shape_are_fixed() -> None:
     assert PUBLIC_ID_PREFIXES == {
+        "agr",
         "al",
         "alr",
         "audit",
@@ -1200,10 +1206,10 @@ def test_location_and_traffic_snapshots_expose_no_resource_ids() -> None:
     assert PageTrafficSnapshot.model_config["extra"] == "forbid"
 
 
-def test_cloud_import_models_accept_only_the_complete_v5_contract() -> None:
+def test_cloud_import_models_accept_the_complete_v7_contract() -> None:
     package = CloudImportPackage.model_validate(cloud_import_package(scope="history"))
 
-    assert package.version == 5
+    assert package.version == 7
     assert package.project_id == "prj_a00000000000000000000000"
     assert package.keywords[0].rankingHistory[0].checkedAt == "2026-07-27T12:00:00Z"
     assert package.alert_rules[0].targets[0].type == "keyword"
@@ -1212,13 +1218,13 @@ def test_cloud_import_models_accept_only_the_complete_v5_contract() -> None:
     )
 
     session = CloudImportSessionCreate(
-        version=5,
+        version=7,
         chunk_count=1,
         source_project_id="prj_a00000000000000000000000",
         totals={"keywords": 1, "rank_checks": 1},
     )
     assert session.model_dump(exclude_none=True) == {
-        "version": 5,
+        "version": 7,
         "chunk_count": 1,
         "source_project_id": "prj_a00000000000000000000000",
         "totals": {"keywords": 1, "rank_checks": 1},
@@ -1265,11 +1271,11 @@ def test_cloud_import_package_rejects_missing_legacy_alias_and_unknown_fields(
     "session",
     [
         {"version": 4, "chunk_count": 1, "source_project_id": "prj_a00000000000000000000000"},
-        {"version": 5, "chunk_count": 1},
-        {"version": 5, "chunk_count": 1, "sourceProjectId": "prj_a00000000000000000000000"},
-        {"version": 5, "chunk_count": 1, "source_project_id": "sid_a00000000000000000000000"},
+        {"version": 7, "chunk_count": 1},
+        {"version": 7, "chunk_count": 1, "sourceProjectId": "prj_a00000000000000000000000"},
+        {"version": 7, "chunk_count": 1, "source_project_id": "sid_a00000000000000000000000"},
         {
-            "version": 5,
+            "version": 7,
             "chunk_count": 1,
             "source_project_id": "prj_a00000000000000000000000",
             "rank_checks": 1,
@@ -1377,8 +1383,8 @@ def test_sends_bearer_auth_and_default_headers_on_protected_requests() -> None:
     assert request.headers["Authorization"] == f"Bearer {API_KEY}"
     assert request.headers["X-Client"] == "sdk-test"
     assert request.headers["X-Request"] == "request"
-    assert request.headers["User-Agent"] == "bisibility-sdk-python/0.11.1"
-    assert request.headers["X-Bisibility-Client"] == "bisibility-sdk-python/0.11.1"
+    assert request.headers["User-Agent"] == "bisibility-sdk-python/0.12.0"
+    assert request.headers["X-Bisibility-Client"] == "bisibility-sdk-python/0.12.0"
     assert request.headers["X-Bisibility-Source"] == "sdk"
     assert request.extensions["timeout"] == {
         "connect": 30.0,
@@ -1396,7 +1402,7 @@ def test_preserves_user_agent_and_allows_disabling_timeout() -> None:
 
     request = queue.requests[-1]
     assert request.headers["User-Agent"] == "my-app/1.0"
-    assert request.headers["X-Bisibility-Client"] == "bisibility-sdk-python/0.11.1"
+    assert request.headers["X-Bisibility-Client"] == "bisibility-sdk-python/0.12.0"
     assert request.headers["X-Bisibility-Source"] == "cli"
     assert request.extensions["timeout"] == {
         "connect": None,
@@ -4754,11 +4760,11 @@ def test_cloud_import_client_rejects_invalid_mapping_before_transport() -> None:
     client = make_client(queue)
 
     with pytest.raises(ValidationError):
-        client.import_cloud_export({"version": 5, "project_id": "prj_a00000000000000000000000"})
+        client.import_cloud_export({"version": 7, "project_id": "prj_a00000000000000000000000"})
 
     with pytest.raises(ValidationError):
         client.create_cloud_import_session(
-            {"version": 5, "chunk_count": 1, "sourceProjectId": "prj_a00000000000000000000000"}
+            {"version": 7, "chunk_count": 1, "sourceProjectId": "prj_a00000000000000000000000"}
         )
 
     with pytest.raises(ValidationError):
@@ -4805,7 +4811,7 @@ def test_cloud_import_session_flow() -> None:
 
     created = client.create_cloud_import_session(
         CloudImportSessionCreate(
-            version=5,
+            version=7,
             chunk_count=2,
             source_project_id="prj_a00000000000000000000000",
         )
@@ -4839,7 +4845,7 @@ def test_cloud_import_session_flow() -> None:
     assert queue.requests[0].method == "POST"
     assert str(queue.requests[0].url) == "https://api.test/api/v1/cloud/import/sessions"
     assert request_json(queue.requests[0]) == {
-        "version": 5,
+        "version": 7,
         "chunk_count": 2,
         "source_project_id": "prj_a00000000000000000000000",
     }
@@ -4870,3 +4876,139 @@ def test_cloud_import_session_flow() -> None:
         "https://api.test/api/v1/cloud/import/sessions/imp_a00000000000000000000000/finalize"
     )
     assert queue.requests[3].content in (b"", b"null")
+
+
+@pytest.mark.parametrize("terminal_status", ["completed", "failed"])
+def test_wait_skips_matching_running_and_other_runs(terminal_status: str) -> None:
+    run_id = "rcr_a00000000000000000000000"
+    responses = iter(
+        [
+            json_response({"id": run_id, "status": "queued"}, 202),
+            json_response(
+                list_response(
+                    [
+                        rank_check(run_id=run_id, status="running"),
+                        rank_check(run_id="rcr_b00000000000000000000000"),
+                    ]
+                )
+            ),
+            json_response(list_response([rank_check(run_id=run_id, status=terminal_status)])),
+        ]
+    )
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return next(responses)
+
+    with BisibilityClient(
+        api_key=API_KEY,
+        base_url="https://api.example.com/api/v1",
+        transport=httpx.MockTransport(handler),
+    ) as client:
+        result = client.run_rank_check_and_wait(
+            "kw_a00000000000000000000000", poll_interval_seconds=0.0
+        )
+    assert result.status == terminal_status
+    assert len(requests) == 3
+
+
+@pytest.mark.parametrize("version", [6, 7])
+def test_cloud_import_current_package_versions(version: int) -> None:
+    package = cloud_import_package(version=version)
+    package["alert_rules"][0]["severity"] = "warning"
+    history = package["keywords"][0]["rankingHistory"][0]
+    history.update({"normalizationVersion": "v2", "provider": "serpapi", "requestedDepth": 20})
+    if version == 6:
+        package["keywords"][0].pop("location_key")
+    if version == 7:
+        package["keywords"][0].update(
+            {"location": "New York", "location_key": "US/New York/New York"}
+        )
+    decoded = CloudImportPackage.model_validate(package)
+    assert decoded.model_dump(exclude_none=True) == package
+    assert (
+        CloudImportSessionCreate.model_validate(
+            {
+                "version": version,
+                "chunk_count": 1,
+                "source_project_id": "prj_a00000000000000000000000",
+            }
+        ).version
+        == version
+    )
+
+
+def test_cloud_import_compatibility_accepts_server_versions_without_enabling_requests() -> None:
+    response = CloudImportCompatibility.model_validate(
+        {
+            "app_version": "1.0.0",
+            "latest_migration": None,
+            "schema_versions_supported": [7, 6, 8],
+        }
+    )
+    assert response.schema_versions_supported == [7, 6, 8]
+    with pytest.raises(ValidationError):
+        CloudImportPackage.model_validate(cloud_import_package(version=8))
+
+
+def test_cloud_import_rejects_ambiguous_legacy_history() -> None:
+    with pytest.raises(ValidationError):
+        CloudImportPackage.model_validate(cloud_import_package(version=5))
+
+
+@pytest.mark.parametrize("versions", [["7"], [7.0], [True], [0], [-1]])
+def test_cloud_import_compatibility_requires_integer_versions(versions: list[Any]) -> None:
+    with pytest.raises(ValidationError):
+        CloudImportCompatibility.model_validate(
+            {
+                "app_version": "1.0.0",
+                "latest_migration": None,
+                "schema_versions_supported": versions,
+            }
+        )
+
+
+def test_cloud_import_transports_required_null_history_fields() -> None:
+    package = cloud_import_package()
+    row = package["keywords"][0]["rankingHistory"][0]
+    row.update(
+        {"position": None, "previousPosition": None, "rankingUrl": None, "requestedDepth": None}
+    )
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(
+            201, json={"counts": {}, "job_id": "imp_a00000000000000000000000", "state": "done"}
+        )
+
+    with BisibilityClient(
+        api_key="mig_test_value_1234567890",
+        base_url="https://api.example.com/api/v1",
+        transport=httpx.MockTransport(handler),
+    ) as client:
+        client.import_cloud_export(package)
+    assert request_json(requests[0]) == package
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        lambda package: package["keywords"][0].pop("location_key"),
+        lambda package: package.update({"version": 6}),
+        lambda package: package["keywords"][0]["rankingHistory"][0].pop("provider"),
+        lambda package: package["keywords"][0]["rankingHistory"][0].pop("requestedDepth"),
+        lambda package: package["keywords"][0]["rankingHistory"][0].update({"requestedDepth": 30}),
+        lambda package: package["keywords"][0]["rankingHistory"][0].update(
+            {"normalizationVersion": "v3"}
+        ),
+    ],
+)
+def test_cloud_import_enforces_versioned_history_and_location_shape(
+    mutation: Callable[[dict[str, Any]], Any],
+) -> None:
+    package = cloud_import_package()
+    mutation(package)
+    with pytest.raises(ValidationError):
+        CloudImportPackage.model_validate(package)

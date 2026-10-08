@@ -13,6 +13,7 @@ from typing import Annotated, Literal, TypeAlias
 from pydantic import Field
 
 PublicIdPrefix: TypeAlias = Literal[
+    "agr",
     "al",
     "alr",
     "audit",
@@ -41,6 +42,7 @@ PublicIdPrefix: TypeAlias = Literal[
 
 PUBLIC_ID_PREFIXES: frozenset[PublicIdPrefix] = frozenset(
     {
+        "agr",
         "al",
         "alr",
         "audit",
@@ -71,7 +73,7 @@ PUBLIC_ID_SUFFIX_PATTERN = r"[a-z][a-z0-9]{23}"
 
 
 def public_id_pattern(prefix: PublicIdPrefix) -> str:
-    """Return the anchored strict-v3 pattern for one resource prefix."""
+    """Return the anchored strict typed public ID pattern for one resource prefix."""
     return rf"^{prefix}_{PUBLIC_ID_SUFFIX_PATTERN}$"
 
 
@@ -110,3 +112,5 @@ TagId: TypeAlias = Annotated[str, Field(pattern=public_id_pattern("tag"))]
 UserId: TypeAlias = Annotated[str, Field(pattern=public_id_pattern("usr"))]
 ViewId: TypeAlias = Annotated[str, Field(pattern=public_id_pattern("viw"))]
 WebhookEndpointId: TypeAlias = Annotated[str, Field(pattern=public_id_pattern("we"))]
+
+AgentReportId: TypeAlias = Annotated[str, Field(pattern=public_id_pattern("agr"))]

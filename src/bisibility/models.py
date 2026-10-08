@@ -21,6 +21,7 @@ from pydantic import (
 from .public_ids import (
     PUBLIC_ID_PREFIXES,
     PUBLIC_ID_SUFFIX_PATTERN,
+    AgentReportId,
     AlertRuleId,
     CheckId,
     CloudImportId,
@@ -1603,7 +1604,7 @@ class CloudImportJob(BisibilityModel):
 class CloudImportCompatibility(BisibilityModel):
     app_version: str
     latest_migration: str | None
-    schema_versions_supported: list[Literal[5]]
+    schema_versions_supported: list[Annotated[int, Field(strict=True, ge=1)]]
 
 
 CloudImportMarket: TypeAlias = Literal[
@@ -1659,35 +1660,45 @@ class CloudImportModel(BisibilityModel):
     model_config = ConfigDict(extra="forbid", populate_by_name=False)
 
 
-class CloudImportV5Model(CloudImportModel):
-    version: Literal[5]
+class CloudImportVersionedModel(CloudImportModel):
+    version: Literal[5, 6, 7]
 
     @field_validator("version", mode="before")
     @classmethod
     def validate_version_type(cls, value: Any) -> Any:
         if type(value) is not int:
-            raise ValueError("version must be the integer 5")
+            raise ValueError("version must be an integer")
         return value
 
 
 class CloudImportRankingHistory(CloudImportModel):
     checkedAt: str
-    position: CloudImportPosition = None
-    previousPosition: CloudImportPosition = None
-    rankingUrl: CloudImportTargetUrl = None
+    normalizationVersion: Literal["v1", "v2"]
+    position: CloudImportPosition
+    previousPosition: CloudImportPosition
+    provider: Annotated[str, Field(min_length=1, max_length=120)]
+    rankingUrl: CloudImportTargetUrl
+    requestedDepth: SerpDepth | None
 
 
 class CloudImportKeyword(CloudImportModel):
     device: Device
     id: KeywordId
     keyword: Annotated[str, Field(min_length=1, max_length=180)]
-    location: CloudImportMarket
+    location: Annotated[str, Field(min_length=1, max_length=240)]
+    location_key: Annotated[str, Field(min_length=1, max_length=260)] | None = None
     rankingHistory: Annotated[list[CloudImportRankingHistory], Field(max_length=5000)] | None = None
     tags: (
         Annotated[list[Annotated[str, Field(min_length=1, max_length=48)]], Field(max_length=12)]
         | None
     ) = None
     target_url: CloudImportTargetUrl = None
+
+    @model_validator(mode="after")
+    def validate_location_identity(self) -> CloudImportKeyword:
+        if self.location_key is None:
+            TypeAdapter(CloudImportMarket).validate_python(self.location)
+        return self
 
 
 class CloudImportCompetitor(CloudImportModel):
@@ -1701,7 +1712,14 @@ class CloudImportKeywordAlertTarget(CloudImportModel):
     type: Literal["keyword"]
     device: Device | None = None
     keyword: Annotated[str, Field(min_length=1, max_length=180)] | None = None
-    location: CloudImportMarket | None = None
+    location: Annotated[str, Field(min_length=1, max_length=240)] | None = None
+    location_key: Annotated[str, Field(min_length=1, max_length=260)] | None = None
+
+    @model_validator(mode="after")
+    def validate_location_identity(self) -> CloudImportKeywordAlertTarget:
+        if self.location_key is None and self.location is not None:
+            TypeAdapter(CloudImportMarket).validate_python(self.location)
+        return self
 
 
 class CloudImportTagAlertTarget(CloudImportModel):
@@ -1716,6 +1734,7 @@ CloudImportAlertRuleTarget: TypeAlias = Annotated[
 
 
 class CloudImportAlertRule(CloudImportModel):
+    severity: Literal["info", "warning", "urgent"] | None = None
     id: AlertRuleId
     name: Annotated[str, Field(min_length=1, max_length=120)]
     change_pct: float | None = None
@@ -1750,8 +1769,8 @@ class CloudImportSavedView(CloudImportModel):
     surface: CloudImportSavedViewSurface | None = None
 
 
-class CloudImportPackage(CloudImportV5Model):
-    """Exact version-5 export package accepted by ``POST /cloud/import``."""
+class CloudImportPackage(CloudImportVersionedModel):
+    """Version 6/7 export package, or metadata-only legacy version 5 package."""
 
     project_id: ProjectId
     keywords: Annotated[list[CloudImportKeyword], Field(max_length=500)]
@@ -1763,6 +1782,17 @@ class CloudImportPackage(CloudImportV5Model):
     saved_views: Annotated[list[CloudImportSavedView], Field(max_length=500)]
     exported_at: str | None = None
     scope: Literal["current", "history"] | None = None
+
+    @model_validator(mode="after")
+    def validate_package_version(self) -> CloudImportPackage:
+        for keyword in self.keywords:
+            if self.version == 5 and keyword.rankingHistory:
+                raise ValueError("Version 5 ranking history is ambiguous; re-export the package.")
+            if self.version < 7 and keyword.location_key is not None:
+                raise ValueError("location_key requires a version 7 package.")
+            if self.version == 7 and keyword.location_key is None:
+                raise ValueError("location_key is required in version 7 packages.")
+        return self
 
 
 CloudImportCounts: TypeAlias = dict[str, int]
@@ -1779,7 +1809,8 @@ class CloudImportSessionTotals(CloudImportModel):
     rank_checks: int | None = Field(default=None, ge=0)
 
 
-class CloudImportSessionCreate(CloudImportV5Model):
+class CloudImportSessionCreate(CloudImportVersionedModel):
+    version: Literal[6, 7]
     chunk_count: int = Field(ge=1, le=500)
     source_project_id: ProjectId
     totals: CloudImportSessionTotals | None = None
@@ -1805,8 +1836,15 @@ class CloudImportChunkResponse(BisibilityModel):
 
 class CloudImportSourceKeyword(CloudImportModel):
     device: Device
-    location: CloudImportMarket
+    location: Annotated[str, Field(min_length=1, max_length=240)]
+    location_key: Annotated[str, Field(min_length=1, max_length=260)] | None = None
     text: str
+
+    @model_validator(mode="after")
+    def validate_location_identity(self) -> CloudImportSourceKeyword:
+        if self.location_key is None:
+            TypeAdapter(CloudImportMarket).validate_python(self.location)
+        return self
 
 
 class CloudImportSessionSections(CloudImportModel):
@@ -2356,3 +2394,189 @@ class StoredResearchReportOptions(BisibilityModel):
     connection_id: ConnectionId | None = None
     language_code: str | None = None
     location_code: int | None = None
+
+
+class AgentReportSummary(BisibilityModel):
+    id: AgentReportId
+    kind: str
+    title: str
+    created_at: str
+
+
+class AgentReportResource(AgentReportSummary):
+    body: JsonObject
+    provenance: JsonObject
+
+
+class ListAgentReportsOptions(PaginationOptions):
+    kind: Annotated[str, Field(max_length=64, pattern=r"^[a-zA-Z][a-zA-Z0-9_-]*$")] | None = None
+    limit: int | None = Field(default=None, ge=1, le=100)
+
+
+class CreateAgentReportInput(BisibilityModel):
+    kind: Annotated[str, Field(max_length=64, pattern=r"^[a-zA-Z][a-zA-Z0-9_-]*$")]
+    title: Annotated[str, Field(min_length=1, max_length=160)]
+    body: JsonObject
+    provenance: JsonObject | None = None
+
+    @field_validator("kind")
+    @classmethod
+    def validate_kind(cls, value: str) -> str:
+        if value.lower() in {"site_audit", "ai_visibility", "prompt_explorer"}:
+            raise ValueError("This kind is reserved for application-generated analyses.")
+        return value
+
+
+class ProjectContextInput(BisibilityModel):
+    business: Annotated[str, Field(max_length=4000)]
+    audience: Annotated[str, Field(max_length=4000)]
+    products: Annotated[str, Field(max_length=4000)]
+    goals: Annotated[str, Field(max_length=4000)]
+    agent_rules: Annotated[str, Field(max_length=4000)]
+
+
+class ProjectContext(ProjectContextInput):
+    updated_at: str | None
+
+
+class RunSiteAuditOptions(BisibilityModel):
+    max_pages: int | None = Field(default=None, ge=1, le=15)
+
+
+class SiteAuditHeading(BisibilityModel):
+    level: int
+    text: str
+
+
+class SiteAuditIssue(BisibilityModel):
+    code: str
+    message: str
+    severity: Literal["error", "warning", "info"]
+
+
+class SiteAuditPage(BisibilityModel):
+    url: str
+    final_url: str
+    status: int | None
+    response_time_ms: float
+    title: str | None
+    description: str | None
+    canonical: str | None
+    headings: list[SiteAuditHeading]
+    h1_count: float
+    indexable: bool
+    robots: str | None
+    internal_link_count: float
+    external_link_count: float
+    internal_links: list[str]
+    image_count: float
+    missing_alt_count: float
+    issues: list[SiteAuditIssue]
+
+
+class SiteAuditLimits(BisibilityModel):
+    max_pages: float
+    max_requests: float
+    max_duration_ms: float
+    max_page_bytes: float
+
+
+class SiteAuditSummary(BisibilityModel):
+    pages: float
+    errors: float
+    warnings: float
+    indexable: float
+
+
+class SiteAuditResult(BisibilityModel):
+    version: Literal[1]
+    target: str
+    started_at: str
+    completed_at: str
+    state: Literal["complete", "partial"]
+    stop_reason: Literal["finished", "page_limit", "time_limit", "request_limit"]
+    limits: SiteAuditLimits
+    requests: float
+    pages: list[SiteAuditPage]
+    summary: SiteAuditSummary
+    limitations: list[str]
+
+
+class SiteAuditReport(BisibilityModel):
+    id: AgentReportId
+    created_at: str
+    cached: bool
+    result: SiteAuditResult
+
+
+class AIResearchInput(BisibilityModel):
+    brand: Annotated[str, Field(min_length=1, max_length=120)]
+    domain: Annotated[str, Field(min_length=1, max_length=63)]
+    max_cost_cents: int = Field(ge=0, le=1000)
+    estimate_only: bool | None = None
+    fresh: bool | None = None
+
+
+class AnalyzeAIVisibilityOptions(AIResearchInput):
+    language_code: Annotated[str, Field(pattern=r"^[a-z]{2}(?:-[A-Z]{2})?$")] | None = None
+    limit: int | None = Field(default=None, ge=1, le=20)
+    location_code: int | None = Field(default=None, ge=1, le=9007199254740991)
+    platform: Literal["chat_gpt", "google"] | None = None
+    target_type: Literal["brand", "domain"] | None = None
+
+
+class CompareAIPromptsOptions(AIResearchInput):
+    prompt: Annotated[str, Field(min_length=1, max_length=500)]
+    models: (
+        Annotated[list[Literal["gpt-4.1-mini", "gpt-4.1-nano"]], Field(min_length=1, max_length=2)]
+        | None
+    ) = None
+
+
+class AIAnalysisCitation(BisibilityModel):
+    title: str
+    url: str
+    target_domain: bool
+
+
+class AIAnalysisRow(BisibilityModel):
+    prompt: str
+    model: str
+    answer: str
+    observed_at: str | None
+    brand_mentioned: bool
+    domain_cited: bool
+    citations: list[AIAnalysisCitation]
+    content_truncated: bool | None = None
+
+
+class AIAnalysisResult(BisibilityModel):
+    evidence: Literal["observed_dataset", "synthetic_prompt_test"]
+    rows: list[AIAnalysisRow]
+    total_available: int | None
+    truncated: bool
+    fetched_at: str
+    cost_cents: float
+    cost_status: Literal["confirmed", "unknown"]
+    failure: str | None
+
+
+class AIAnalysisEstimate(BisibilityModel):
+    ok: Literal[True]
+    estimate: Literal[True]
+    estimated_cost_cents: float
+    evidence: Literal["observed_dataset", "synthetic_prompt_test"]
+
+
+class AIAnalysisReport(BisibilityModel):
+    ok: Literal[True]
+    estimate: Literal[False]
+    cached: bool
+    report_id: AgentReportId
+    cost_cents: float
+    result: AIAnalysisResult
+
+
+AIAnalysisOutcome: TypeAlias = Annotated[
+    AIAnalysisEstimate | AIAnalysisReport, Field(discriminator="estimate")
+]

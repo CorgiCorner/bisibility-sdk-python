@@ -31,9 +31,13 @@ from .errors import (
 )
 from .models import (
     AddCompetitorInput,
+    AgentReportResource,
+    AgentReportSummary,
+    AIAnalysisOutcome,
     AlertRule,
     AlertRuleDeleteResult,
     AlertRuleInput,
+    AnalyzeAIVisibilityOptions,
     AnalyzeBacklinksOptions,
     AnalyzeDomainOverviewOptions,
     ApiKey,
@@ -45,15 +49,18 @@ from .models import (
     CloudImportCompatibility,
     CloudImportFinalizeResponse,
     CloudImportKeywordUploadChunk,
+    CloudImportModel,
     CloudImportPackage,
     CloudImportSectionsUploadChunk,
     CloudImportSessionCreate,
     CloudImportSessionCreateResponse,
+    CompareAIPromptsOptions,
     Competitor,
     CompetitorRemoveResult,
     ConnectProviderInput,
     CostEstimate,
     CostEstimateOptions,
+    CreateAgentReportInput,
     CreatedApiKey,
     CreatedPersonalAccessToken,
     CreatedTeamInvite,
@@ -82,6 +89,7 @@ from .models import (
     KeywordMetricsResponse,
     KeywordResearchOptions,
     KeywordResearchResponse,
+    ListAgentReportsOptions,
     ListCompetitorsResponse,
     ListKeywordsOptions,
     ListMigrationTokensResponse,
@@ -110,6 +118,8 @@ from .models import (
     PersonalAccessTokenCreateInput,
     ProblemDetails,
     Project,
+    ProjectContext,
+    ProjectContextInput,
     ProjectDefaults,
     ProjectDefaultsPatch,
     ProjectOverview,
@@ -133,6 +143,7 @@ from .models import (
     RunRankCheckInput,
     RunRankCheckResult,
     RunRankCheckResultAdapter,
+    RunSiteAuditOptions,
     SavedKeyword,
     SavedKeywordDeleteResult,
     SavedView,
@@ -140,6 +151,7 @@ from .models import (
     SearchLocationsOptions,
     SearchPerformanceQueryStatsResponse,
     Signal,
+    SiteAuditReport,
     SitemapMonitor,
     SitemapMonitorListResponse,
     SitemapMonitorPatch,
@@ -181,7 +193,7 @@ _MISSING = object()
 try:
     SDK_VERSION = version("bisibility")
 except PackageNotFoundError:  # pragma: no cover - source tree without installed metadata
-    SDK_VERSION = "0.11.1"
+    SDK_VERSION = "0.12.0"
 CLIENT_ID = f"bisibility-sdk-python/{SDK_VERSION}"
 AUTH_TOKEN_PREFIXES = ("bsb_key_live_", "bsb_key_test_", "bsb_pat_live_", "mig_")
 
@@ -306,7 +318,12 @@ def _dump_body(
 ) -> dict[str, Any]:
     """Validate a mapping body before it can cross the HTTP boundary."""
     parsed = value if isinstance(value, model) else model.model_validate(value)
-    return parsed.model_dump(mode="python", by_alias=True, exclude_none=True, exclude_unset=True)
+    return parsed.model_dump(
+        mode="python",
+        by_alias=True,
+        exclude_none=not isinstance(parsed, CloudImportModel),
+        exclude_unset=True,
+    )
 
 
 def _dump_cloud_import_chunk(
@@ -319,7 +336,7 @@ def _dump_cloud_import_chunk(
         parsed = CloudImportSectionsUploadChunk.model_validate(value)
     else:
         parsed = CloudImportKeywordUploadChunk.model_validate(value)
-    return parsed.model_dump(mode="python", by_alias=True, exclude_none=True, exclude_unset=True)
+    return parsed.model_dump(mode="python", by_alias=True, exclude_unset=True)
 
 
 def _coerce_request_options(value: RequestOptionsLike = None) -> RequestOptions:
@@ -459,6 +476,136 @@ class BisibilityClient:
 
     def __exit__(self, exc_type: object, exc_value: object, traceback: object) -> None:
         self.close()
+
+    def get_project_context(
+        self, project_id: str, request_options: RequestOptionsLike = None
+    ) -> DataResponse[ProjectContext]:
+        return self._request(
+            "GET",
+            f"/projects/{_encoded_path_segment(project_id, 'prj')}/context",
+            response_model=DataResponse[ProjectContext],
+            request_options=request_options,
+        )
+
+    def update_project_context(
+        self,
+        project_id: str,
+        input: ProjectContextInput | Mapping[str, Any],
+        request_options: RequestOptionsLike = None,
+    ) -> DataResponse[ProjectContext]:
+        return self._request(
+            "PATCH",
+            f"/projects/{_encoded_path_segment(project_id, 'prj')}/context",
+            body=_dump_body(input, ProjectContextInput),
+            response_model=DataResponse[ProjectContext],
+            request_options=request_options,
+        )
+
+    def list_agent_reports(
+        self,
+        project_id: str,
+        options: ListAgentReportsOptions | Mapping[str, Any] | None = None,
+        request_options: RequestOptionsLike = None,
+    ) -> ListResponse[AgentReportSummary]:
+        return self._request(
+            "GET",
+            f"/projects/{_encoded_path_segment(project_id, 'prj')}/agent-reports",
+            query=_dump_options(options, ListAgentReportsOptions),
+            response_model=ListResponse[AgentReportSummary],
+            request_options=request_options,
+        )
+
+    def create_agent_report(
+        self,
+        project_id: str,
+        input: CreateAgentReportInput | Mapping[str, Any],
+        request_options: RequestOptionsLike = None,
+    ) -> DataResponse[AgentReportResource]:
+        return self._request(
+            "POST",
+            f"/projects/{_encoded_path_segment(project_id, 'prj')}/agent-reports",
+            body=_dump_body(input, CreateAgentReportInput),
+            response_model=DataResponse[AgentReportResource],
+            request_options=request_options,
+        )
+
+    def get_agent_report(
+        self, project_id: str, report_id: str, request_options: RequestOptionsLike = None
+    ) -> DataResponse[AgentReportResource]:
+        return self._request(
+            "GET",
+            (
+                f"/projects/{_encoded_path_segment(project_id, 'prj')}/agent-reports/"
+                f"{_encoded_path_segment(report_id, 'agr')}"
+            ),
+            response_model=DataResponse[AgentReportResource],
+            request_options=request_options,
+        )
+
+    def list_site_audits(
+        self, project_id: str, request_options: RequestOptionsLike = None
+    ) -> DataResponse[list[AgentReportSummary]]:
+        return self._request(
+            "GET",
+            f"/projects/{_encoded_path_segment(project_id, 'prj')}/site-audits",
+            response_model=DataResponse[list[AgentReportSummary]],
+            request_options=request_options,
+        )
+
+    def run_site_audit(
+        self,
+        project_id: str,
+        input: RunSiteAuditOptions | Mapping[str, Any] | None = None,
+        request_options: RequestOptionsLike = None,
+    ) -> DataResponse[SiteAuditReport]:
+        return self._request(
+            "POST",
+            f"/projects/{_encoded_path_segment(project_id, 'prj')}/site-audits",
+            body=_dump_body(input or {}, RunSiteAuditOptions),
+            response_model=DataResponse[SiteAuditReport],
+            request_options=request_options,
+        )
+
+    def get_site_audit(
+        self, project_id: str, report_id: str, request_options: RequestOptionsLike = None
+    ) -> DataResponse[SiteAuditReport]:
+        return self._request(
+            "GET",
+            (
+                f"/projects/{_encoded_path_segment(project_id, 'prj')}/site-audits/"
+                f"{_encoded_path_segment(report_id, 'agr')}"
+            ),
+            response_model=DataResponse[SiteAuditReport],
+            request_options=request_options,
+        )
+
+    def analyze_ai_visibility(
+        self,
+        project_id: str,
+        input: AnalyzeAIVisibilityOptions | Mapping[str, Any],
+        request_options: RequestOptionsLike = None,
+    ) -> DataResponse[AIAnalysisOutcome]:
+        return self._request(
+            "POST",
+            f"/projects/{_encoded_path_segment(project_id, 'prj')}/ai-visibility",
+            body=_dump_body(input, AnalyzeAIVisibilityOptions),
+            response_model=DataResponse[AIAnalysisOutcome],
+            request_options=request_options,
+        )
+
+    def compare_ai_prompts(
+        self,
+        project_id: str,
+        input: CompareAIPromptsOptions | Mapping[str, Any],
+        request_options: RequestOptionsLike = None,
+    ) -> DataResponse[AIAnalysisOutcome]:
+        return self._request(
+            "POST",
+            f"/projects/{_encoded_path_segment(project_id, 'prj')}/prompt-explorer",
+            body=_dump_body(input, CompareAIPromptsOptions),
+            response_model=DataResponse[AIAnalysisOutcome],
+            request_options=request_options,
+        )
 
     def get_health(self, request_options: RequestOptionsLike = None) -> HealthResponse:
         return self._request(
@@ -1274,7 +1421,7 @@ class BisibilityClient:
 
         A queued run is followed to its result through the ``run_id`` carried by
         every rank check. Raises ``BisibilityTimeoutError`` when the deadline
-        passes before the check appears.
+        passes before the check finishes.
         """
         started = self.run_rank_check(keyword_id, input, request_options)
         if not isinstance(started, RankCheckRunQueued):
@@ -1283,13 +1430,11 @@ class BisibilityClient:
         while True:
             history = self.list_rank_checks(keyword_id, {"limit": 50}, request_options)
             for check in history.data:
-                if check.run_id == started.id:
+                if check.run_id == started.id and check.status in ("completed", "failed"):
                     return check
             if time.monotonic() >= deadline:
-                raise BisibilityTimeoutError(
-                    f"Rank check run {started.id} did not produce a check in time."
-                )
-            time.sleep(poll_interval_seconds)
+                raise BisibilityTimeoutError(f"Rank check run {started.id} did not finish in time.")
+            time.sleep(min(poll_interval_seconds, max(0.0, deadline - time.monotonic())))
 
     def get_rank_check_result(
         self,
@@ -1712,8 +1857,10 @@ class BisibilityClient:
         """Read a saved report; fresh_until is authoritative for freshness."""
         return self._request(
             "GET",
-            (f"/projects/{_encoded_path_segment(project_id, 'prj')}/research/reports/"
-             f"{_encoded_natural_path_segment(kind)}"),
+            (
+                f"/projects/{_encoded_path_segment(project_id, 'prj')}/research/reports/"
+                f"{_encoded_natural_path_segment(kind)}"
+            ),
             query=_dump_options(options, StoredResearchReportOptions),
             response_model=StoredResearchReportResponse,
             request_options=request_options,
@@ -1745,8 +1892,10 @@ class BisibilityClient:
         )
         return self._request(
             "PATCH",
-            (f"/projects/{_encoded_path_segment(project_id, 'prj')}/providers/"
-             f"{_encoded_natural_path_segment(provider_id)}/budgets"),
+            (
+                f"/projects/{_encoded_path_segment(project_id, 'prj')}/providers/"
+                f"{_encoded_natural_path_segment(provider_id)}/budgets"
+            ),
             body=_dump_jsonable(parsed),
             response_model=ProviderBudgets,
             request_options=request_options,
@@ -2185,7 +2334,7 @@ class BisibilityClient:
     ) -> CloudImportSessionCreateResponse:
         """Open a chunked cloud import session via POST /cloud/import/sessions.
 
-        ``session`` declares the version-5 export ``version``, ``chunk_count``
+        ``session`` declares export ``version`` 6 or 7, ``chunk_count``
         and required ``source_project_id`` (plus optional ``totals``). The
         response carries the ``imp_``-prefixed ``session_id`` used to upload
         chunks and the per-chunk size limits enforced by the server.
@@ -2363,6 +2512,20 @@ class BisibilityClient:
         initial = _dump_options(options, PaginationOptions)
         return self._iterate_cursor(
             lambda page: list_method(project_id, page, request_options), initial
+        )
+
+    def iter_agent_reports(
+        self,
+        project_id: str,
+        options: ListAgentReportsOptions | Mapping[str, Any] | None = None,
+        request_options: RequestOptionsLike = None,
+    ) -> Iterator[AgentReportSummary]:
+        initial = _dump_options(options, ListAgentReportsOptions)
+        return cast(
+            Iterator[AgentReportSummary],
+            self._iterate_cursor(
+                lambda page: self.list_agent_reports(project_id, page, request_options), initial
+            ),
         )
 
     def iter_alert_rules(

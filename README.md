@@ -1,7 +1,7 @@
 # bisibility
 
-> Part of [bisibility](https://github.com/CorgiCorner/bisibility) - open-source keyword
-> rank tracking you can self-host and automate. This repository contains the Python SDK
+> Part of [bisibility](https://github.com/CorgiCorner/bisibility) - open-source SEO platform
+> you can self-host and automate. This repository contains the Python SDK
 > for the Bisibility REST API.
 >
 > [Docs](https://bisibility.com/docs) ·
@@ -108,9 +108,10 @@ async def list_all_keywords(project_id: str) -> None:
 `create_async_bisibility_client()` is the factory counterpart to
 `create_bisibility_client()`. Async requests preserve the same authentication,
 timeouts, retries, validation, errors, and cursor filters as the synchronous
-client. Retry delays are cancellable and do not block the event loop.
+client. Retry delays and `run_rank_check_and_wait` polling are cancellable and
+do not block the event loop.
 
-### Public IDs and cursors v3
+### Public IDs and v3 cursors
 
 Every resource identifier at the HTTP boundary is a strict lowercase public ID:
 `<prefix>_[a-z][a-z0-9]{23}`. The SDK rejects raw database IDs, legacy IDs,
@@ -119,8 +120,8 @@ request. The same validation is applied to typed request bodies, project header,
 and ID-bearing API responses. A malformed success response raises
 `BisibilityResponseError`.
 
-The registry is fixed to: `al`, `alr`, `audit`, `check`, `cmp`, `conn`, `dwh`,
-`ferry`, `imp`, `inv`, `key`, `kw`, `mbr`, `ntf`, `pat`, `prj`, `sid`, `sig`,
+The SDK registry is: `agr`, `al`, `alr`, `audit`, `check`, `cmp`, `conn`, `dwh`,
+`ferry`, `imp`, `inv`, `key`, `kw`, `mbr`, `ntf`, `pat`, `prj`, `rcr`, `sid`, `sig`,
 `svkw`, `tag`, `usr`, `viw`, and `we`. Import
 `PUBLIC_ID_PREFIXES` or `public_id_pattern()` when another component needs the
 same contract.
@@ -129,8 +130,9 @@ List operations accept and return opaque v3 cursors. Pass `meta.next_cursor`
 back unchanged; the SDK rejects legacy, unversioned, and malformed cursors
 before a request is sent or a success response is returned.
 
-Cloud transfer uses package version 5 only. Its project, cloud-import, and
-transfer-token identifiers follow the same public-ID rules.
+Cloud transfer supports package versions 6 and 7, plus metadata-only version 5
+packages. Project, cloud-import, and transfer-token identifiers follow the same
+public-ID rules.
 
 The examples below reuse `project_id` and `keyword_id` values returned by the
 API, as shown in the quickstart, instead of embedding synthetic resource IDs.
@@ -225,9 +227,26 @@ bisibility.create_api_key(
   `create_cloud_import_session`, `upload_cloud_import_chunk`,
   `finalize_cloud_import_session`
 
-### Cloud import v5
+### Research workspace
 
-Cloud import accepts only version 5 packages. Every package must use strict
+The client provides typed project context, agent report, AI visibility, prompt
+comparison, and site audit methods. Agent reports use strict `agr_` IDs, and
+`iter_agent_reports` preserves report-kind filters while following v3 cursors.
+AI analysis methods require `max_cost_cents` and distinguish estimates from saved
+results.
+
+### Cloud import
+
+The client accepts version 6 and 7 packages. Version 7 requires a
+`location_key` for every keyword; version 6 uses legacy market names without
+that field. Both versions require history rows to include `normalizationVersion`,
+`provider`, `requestedDepth`, `position`, `previousPosition`, and `rankingUrl`
+alongside `checkedAt`. Nullable history fields remain explicit JSON nulls.
+Version 5 is accepted only without ranking history. Sessions require version 6 or 7.
+`get_cloud_import_compatibility` returns integer versions advertised by the server,
+including versions this SDK cannot yet send.
+
+Every package must use strict
 snake_case top-level keys and include all five section arrays, even when they
 are empty. Package, session, chunk, and response identifiers are validated as
 typed public IDs before a request is sent.
@@ -236,7 +255,7 @@ typed public IDs before a request is sent.
 from bisibility import CloudImportPackage, CloudImportSessionCreate
 
 package = CloudImportPackage(
-    version=5,
+    version=7,
     project_id=project_id,
     keywords=[],
     alert_rules=[],
@@ -246,7 +265,7 @@ package = CloudImportPackage(
 )
 
 session = CloudImportSessionCreate(
-    version=5,
+    version=7,
     chunk_count=1,
     source_project_id=project_id,
 )
@@ -393,10 +412,6 @@ All SDK-defined exceptions derive from `BisibilityError`. `BisibilityApiError`
 also exposes `is_rate_limit`, `is_not_found`, and `retry_after_seconds` helpers.
 Problem responses follow RFC 9457 and preserve extension members; sensitive
 response headers are removed before an API error is exposed.
-
-There is intentionally no `create_project` method: the API returns
-`403 Forbidden` for `POST /projects` because project-scoped API keys cannot
-create projects. Create projects from the Bisibility app instead.
 
 `list_keywords` supports `country`, `device`, `tag`, `topic`, `intent`,
 `position_gt`/`position_lt`, `search` and `sort` filters via

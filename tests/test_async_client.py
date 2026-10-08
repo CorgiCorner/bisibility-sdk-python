@@ -357,3 +357,122 @@ def test_async_client_does_not_close_injected_http_client() -> None:
         await http_client.aclose()
 
     asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("terminal_status", ["completed", "failed"])
+def test_async_wait_polls_matching_run_until_terminal(terminal_status: str) -> None:
+    from test_client import rank_check
+
+    requests: list[httpx.Request] = []
+    run_id = "rcr_a00000000000000000000000"
+    responses = iter(
+        [
+            httpx.Response(202, json={"id": run_id, "status": "queued"}),
+            httpx.Response(
+                200,
+                json={
+                    "data": [
+                        rank_check(run_id=run_id, status="running"),
+                        rank_check(run_id="rcr_b00000000000000000000000"),
+                    ],
+                    "meta": {"next_cursor": None},
+                },
+            ),
+            httpx.Response(
+                200,
+                json={
+                    "data": [rank_check(run_id=run_id, status=terminal_status)],
+                    "meta": {"next_cursor": None},
+                },
+            ),
+        ]
+    )
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return next(responses)
+
+    async def scenario() -> None:
+        async with AsyncBisibilityClient(
+            api_key=API_KEY,
+            base_url="https://api.example.com/api/v1",
+            transport=httpx.MockTransport(handler),
+        ) as client:
+            result = await client.run_rank_check_and_wait(
+                "kw_a00000000000000000000000", poll_interval_seconds=0.0
+            )
+            assert result.status == terminal_status
+            assert len(requests) == 3
+
+    asyncio.run(scenario())
+
+
+def test_async_wait_sleep_yields_and_can_be_cancelled() -> None:
+    from test_client import rank_check
+
+    async def scenario() -> None:
+        polled = asyncio.Event()
+        run_id = "rcr_a00000000000000000000000"
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            if request.method == "POST":
+                return httpx.Response(202, json={"id": run_id, "status": "queued"})
+            polled.set()
+            return httpx.Response(
+                200,
+                json={
+                    "data": [rank_check(run_id=run_id, status="running")],
+                    "meta": {"next_cursor": None},
+                },
+            )
+
+        async with AsyncBisibilityClient(
+            api_key=API_KEY,
+            base_url="https://api.example.com/api/v1",
+            transport=httpx.MockTransport(handler),
+        ) as client:
+            task = asyncio.create_task(
+                client.run_rank_check_and_wait(
+                    "kw_a00000000000000000000000", poll_interval_seconds=60.0
+                )
+            )
+            try:
+                await asyncio.wait_for(polled.wait(), timeout=1.0)
+                assert not task.done()
+            finally:
+                task.cancel()
+                with pytest.raises(asyncio.CancelledError):
+                    await asyncio.wait_for(task, timeout=1.0)
+
+    asyncio.run(scenario())
+
+
+def test_async_wait_times_out_for_matching_running_result() -> None:
+    from bisibility import BisibilityTimeoutError
+    from test_client import rank_check
+
+    run_id = "rcr_a00000000000000000000000"
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.method == "POST":
+            return httpx.Response(202, json={"id": run_id, "status": "queued"})
+        return httpx.Response(
+            200,
+            json={
+                "data": [rank_check(run_id=run_id, status="running")],
+                "meta": {"next_cursor": None},
+            },
+        )
+
+    async def scenario() -> None:
+        async with AsyncBisibilityClient(
+            api_key=API_KEY,
+            base_url="https://api.example.com/api/v1",
+            transport=httpx.MockTransport(handler),
+        ) as client:
+            with pytest.raises(BisibilityTimeoutError):
+                await client.run_rank_check_and_wait(
+                    "kw_a00000000000000000000000", timeout_seconds=0.0
+                )
+
+    asyncio.run(scenario())

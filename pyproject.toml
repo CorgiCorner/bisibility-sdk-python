@@ -4,8 +4,8 @@ build-backend = "hatchling.build"
 
 [project]
 name = "bisibility"
-version = "0.11.1"
-description = "Python client for the Bisibility API - SEO rank tracking, keywords, and ranking history."
+version = "0.12.0"
+description = "Python client for the bisibility SEO platform API."
 readme = "README.md"
 requires-python = ">=3.10"
 license = "Apache-2.0"
@@ -48,7 +48,7 @@ dev = [
 
 [project.urls]
 Homepage = "https://bisibility.com"
-Documentation = "https://bisibility.com/docs/api"
+Documentation = "https://bisibility.com/docs/api/overview"
 Source = "https://github.com/CorgiCorner/bisibility-sdk-python"
 
 [tool.hatch.build.targets.wheel]

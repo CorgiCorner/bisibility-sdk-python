@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.12.0 - 2026-10-07
+
+- Add typed project context, agent reports, AI visibility, prompt comparison, and site-audit
+  methods, including strict report IDs and cursor iteration.
+- Keep queued rank-check polling active until the matching check is completed or failed; the
+  asynchronous helper now polls without blocking and supports cancellation.
+- Support cloud-import package and session versions 6 and 7, including current ranking-history
+  metadata, canonical location keys, and alert severity. Preserve required null history values,
+  accept server-advertised integer compatibility versions, and reject ambiguous legacy history.
+- Correct product, public-ID, project-creation, migration, and documentation-link guidance.
+
 ## 0.11.1 - 2026-09-27
 
 - Replaced the stale README version label with a link to the current package registry release.

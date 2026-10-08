@@ -34,12 +34,15 @@ from .client import (
 from .errors import (
     BisibilityConfigurationError,
     BisibilityNetworkError,
+    BisibilityTimeoutError,
 )
 from .models import (
+    AgentReportSummary,
     AlertRule,
     ApiKey,
     Competitor,
     Keyword,
+    ListAgentReportsOptions,
     ListKeywordsOptions,
     ListMigrationTokensResponse,
     ListRankChecksOptions,
@@ -48,6 +51,8 @@ from .models import (
     PaginationOptions,
     Provider,
     RankCheck,
+    RankCheckRunQueued,
+    RunRankCheckInput,
     SavedKeyword,
     SavedView,
     Signal,
@@ -139,6 +144,16 @@ class AsyncBisibilityClient(BisibilityClient):
     get_stored_research_report = _asyncify(BisibilityClient.get_stored_research_report)  # type: ignore[assignment]
     list_provider_budgets = _asyncify(BisibilityClient.list_provider_budgets)  # type: ignore[assignment]
     update_provider_budgets = _asyncify(BisibilityClient.update_provider_budgets)  # type: ignore[assignment]
+    get_project_context = _asyncify(BisibilityClient.get_project_context)  # type: ignore[assignment]
+    update_project_context = _asyncify(BisibilityClient.update_project_context)  # type: ignore[assignment]
+    list_agent_reports = _asyncify(BisibilityClient.list_agent_reports)  # type: ignore[assignment]
+    create_agent_report = _asyncify(BisibilityClient.create_agent_report)  # type: ignore[assignment]
+    get_agent_report = _asyncify(BisibilityClient.get_agent_report)  # type: ignore[assignment]
+    list_site_audits = _asyncify(BisibilityClient.list_site_audits)  # type: ignore[assignment]
+    run_site_audit = _asyncify(BisibilityClient.run_site_audit)  # type: ignore[assignment]
+    get_site_audit = _asyncify(BisibilityClient.get_site_audit)  # type: ignore[assignment]
+    analyze_ai_visibility = _asyncify(BisibilityClient.analyze_ai_visibility)  # type: ignore[assignment]
+    compare_ai_prompts = _asyncify(BisibilityClient.compare_ai_prompts)  # type: ignore[assignment]
     get_health = _asyncify(BisibilityClient.get_health)  # type: ignore[assignment]
     get_liveness = _asyncify(BisibilityClient.get_liveness)  # type: ignore[assignment]
     get_readiness = _asyncify(BisibilityClient.get_readiness)  # type: ignore[assignment]
@@ -204,9 +219,32 @@ class AsyncBisibilityClient(BisibilityClient):
     bulk_update_keywords = _asyncify(BisibilityClient.bulk_update_keywords)  # type: ignore[assignment]
     list_rank_checks = _asyncify(BisibilityClient.list_rank_checks)  # type: ignore[assignment]
     run_rank_check = _asyncify(BisibilityClient.run_rank_check)  # type: ignore[assignment]
-    run_rank_check_and_wait = _asyncify(  # type: ignore[assignment]
-        BisibilityClient.run_rank_check_and_wait
-    )
+
+    async def run_rank_check_and_wait(  # type: ignore[override]
+        self,
+        keyword_id: str,
+        input: RunRankCheckInput | Mapping[str, Any] | None = None,
+        request_options: RequestOptionsLike = None,
+        *,
+        timeout_seconds: float = 120.0,
+        poll_interval_seconds: float = 1.0,
+    ) -> RankCheck:
+        """Run a check and asynchronously poll until its matching result finishes."""
+        started = await self.run_rank_check(keyword_id, input, request_options)
+        if not isinstance(started, RankCheckRunQueued):
+            return started
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + timeout_seconds
+        while True:
+            history = await self.list_rank_checks(keyword_id, {"limit": 50}, request_options)
+            for check in history.data:
+                if check.run_id == started.id and check.status in ("completed", "failed"):
+                    return check
+            remaining = deadline - loop.time()
+            if remaining <= 0:
+                raise BisibilityTimeoutError(f"Rank check run {started.id} did not finish in time.")
+            await asyncio.sleep(min(poll_interval_seconds, remaining))
+
     get_rank_check_result = _asyncify(BisibilityClient.get_rank_check_result)  # type: ignore[assignment]
     create_signal = _asyncify(BisibilityClient.create_signal)  # type: ignore[assignment]
     list_project_signals = _asyncify(BisibilityClient.list_project_signals)  # type: ignore[assignment]
@@ -345,6 +383,18 @@ class AsyncBisibilityClient(BisibilityClient):
             lambda page: self.list_webhooks(project_id, page, request_options), initial
         ):
             yield cast(Webhook, item)
+
+    async def iter_agent_reports(  # type: ignore[override]
+        self,
+        project_id: str,
+        options: ListAgentReportsOptions | Mapping[str, Any] | None = None,
+        request_options: RequestOptionsLike = None,
+    ) -> AsyncIterator[AgentReportSummary]:
+        initial = _dump_options(options, ListAgentReportsOptions)
+        async for item in self._aiterate_cursor(
+            lambda page: self.list_agent_reports(project_id, page, request_options), initial
+        ):
+            yield cast(AgentReportSummary, item)
 
     async def iter_keywords(  # type: ignore[override]
         self,
