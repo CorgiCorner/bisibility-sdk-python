@@ -1,5 +1,20 @@
 # Changelog
 
+## Unreleased
+
+## 0.16.0 - 2026-10-10
+
+- Add typed project AI tracking operations for topics, immutable prompt revisions, schedules,
+  consented runs, samples, history, trends, evidence exports, and accepted suggestions.
+- Add free AI research catalog reads and prompt comparison options for current models, web search,
+  locale hints, and explicitly acknowledged provider actual-cost mode.
+- Add reviewed model suggestion preview and generation with a frozen preview, explicit paid consent,
+  and a stable idempotency UUID. Accepted edits retain trusted generation or provider dataset references.
+- Preserve unknown costs and observation times as null, and expose optional evidence export
+  completeness and resume metadata.
+- Accepted unavailable backlinks history while preserving normal history validation and typed rank and latest-check evidence.
+- Stopped automatic retries of potentially paid requests, kept required null tracking fields, made schedule updates partial and modelled trends baseline, category and strata.
+
 ## 0.12.0 - 2026-10-07
 
 - Add typed project context, agent reports, AI visibility, prompt comparison, and site-audit

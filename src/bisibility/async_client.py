@@ -154,6 +154,33 @@ class AsyncBisibilityClient(BisibilityClient):
     get_site_audit = _asyncify(BisibilityClient.get_site_audit)  # type: ignore[assignment]
     analyze_ai_visibility = _asyncify(BisibilityClient.analyze_ai_visibility)  # type: ignore[assignment]
     compare_ai_prompts = _asyncify(BisibilityClient.compare_ai_prompts)  # type: ignore[assignment]
+    ai_tracking_suggestions_preview = _asyncify(BisibilityClient.ai_tracking_suggestions_preview)  # type: ignore[assignment]
+    ai_tracking_suggestions_generate = _asyncify(BisibilityClient.ai_tracking_suggestions_generate)  # type: ignore[assignment]
+    list_ai_tracking_topics = _asyncify(BisibilityClient.list_ai_tracking_topics)  # type: ignore[assignment]
+    create_ai_tracking_topic = _asyncify(BisibilityClient.create_ai_tracking_topic)  # type: ignore[assignment]
+    update_ai_tracking_topic = _asyncify(BisibilityClient.update_ai_tracking_topic)  # type: ignore[assignment]
+    archive_ai_tracking_topic = _asyncify(BisibilityClient.archive_ai_tracking_topic)  # type: ignore[assignment]
+    list_ai_tracking_prompts = _asyncify(BisibilityClient.list_ai_tracking_prompts)  # type: ignore[assignment]
+    create_ai_tracking_prompt = _asyncify(BisibilityClient.create_ai_tracking_prompt)  # type: ignore[assignment]
+    update_ai_tracking_prompt = _asyncify(BisibilityClient.update_ai_tracking_prompt)  # type: ignore[assignment]
+    archive_ai_tracking_prompt = _asyncify(BisibilityClient.archive_ai_tracking_prompt)  # type: ignore[assignment]
+    list_ai_tracking_schedules = _asyncify(BisibilityClient.list_ai_tracking_schedules)  # type: ignore[assignment]
+    create_ai_tracking_schedule = _asyncify(BisibilityClient.create_ai_tracking_schedule)  # type: ignore[assignment]
+    update_ai_tracking_schedule = _asyncify(BisibilityClient.update_ai_tracking_schedule)  # type: ignore[assignment]
+    archive_ai_tracking_schedule = _asyncify(BisibilityClient.archive_ai_tracking_schedule)  # type: ignore[assignment]
+    preview_ai_tracking_run = _asyncify(BisibilityClient.preview_ai_tracking_run)  # type: ignore[assignment]
+    create_ai_tracking_run = _asyncify(BisibilityClient.create_ai_tracking_run)  # type: ignore[assignment]
+    list_ai_tracking_runs = _asyncify(BisibilityClient.list_ai_tracking_runs)  # type: ignore[assignment]
+    get_ai_tracking_run = _asyncify(BisibilityClient.get_ai_tracking_run)  # type: ignore[assignment]
+    list_ai_tracking_samples = _asyncify(BisibilityClient.list_ai_tracking_samples)  # type: ignore[assignment]
+    cancel_ai_tracking_run = _asyncify(BisibilityClient.cancel_ai_tracking_run)  # type: ignore[assignment]
+    retry_ai_tracking_run = _asyncify(BisibilityClient.retry_ai_tracking_run)  # type: ignore[assignment]
+    get_ai_tracking_history = _asyncify(BisibilityClient.get_ai_tracking_history)  # type: ignore[assignment]
+    get_ai_tracking_trends = _asyncify(BisibilityClient.get_ai_tracking_trends)  # type: ignore[assignment]
+    export_ai_tracking_evidence = _asyncify(BisibilityClient.export_ai_tracking_evidence)  # type: ignore[assignment]
+    suggest_ai_tracking_prompts = _asyncify(BisibilityClient.suggest_ai_tracking_prompts)  # type: ignore[assignment]
+    accept_ai_tracking_suggestions = _asyncify(BisibilityClient.accept_ai_tracking_suggestions)  # type: ignore[assignment]
+    get_ai_research_catalog = _asyncify(BisibilityClient.get_ai_research_catalog)  # type: ignore[assignment]
     get_health = _asyncify(BisibilityClient.get_health)  # type: ignore[assignment]
     get_liveness = _asyncify(BisibilityClient.get_liveness)  # type: ignore[assignment]
     get_readiness = _asyncify(BisibilityClient.get_readiness)  # type: ignore[assignment]
@@ -562,6 +589,7 @@ class AsyncBisibilityClient(BisibilityClient):
         auth: bool = True,
         body: object = _MISSING,
         parse_as: Literal["text"] | None = None,
+        paid: bool = False,
         query: QueryParams | None = None,
         request_options: RequestOptionsLike = None,
         response_model: ResponseModel[T] | None = None,
@@ -608,6 +636,7 @@ class AsyncBisibilityClient(BisibilityClient):
             url,
             request_kwargs,
             accepted_status_codes=accepted_status_codes,
+            paid=paid,
         )
         if (
             response.status_code < 200 or response.status_code >= 300
@@ -624,6 +653,7 @@ class AsyncBisibilityClient(BisibilityClient):
         request_kwargs: dict[str, Any],
         *,
         accepted_status_codes: frozenset[int] = frozenset(),
+        paid: bool = False,
     ) -> httpx.Response:
         headers: Mapping[str, str] = request_kwargs.get("headers") or {}
         retryable = method.upper() in IDEMPOTENT_METHODS or any(
@@ -635,7 +665,10 @@ class AsyncBisibilityClient(BisibilityClient):
             try:
                 response = await client.request(method, url, **request_kwargs)
             except httpx.RequestError as exc:
-                if retries_left:
+                # A paid request may have reached the server before the response
+                # was lost; the backend treats these GETs as non-idempotent and a
+                # blind retry would risk double-billing the provider budget.
+                if retries_left and not paid:
                     await asyncio.sleep(_backoff_seconds(attempt))
                     continue
                 raise BisibilityNetworkError(

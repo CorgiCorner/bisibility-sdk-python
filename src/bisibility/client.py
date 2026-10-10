@@ -9,6 +9,7 @@ send it on every request.
 
 from __future__ import annotations
 
+import re
 import time
 from collections.abc import Callable, Iterator, Mapping
 from dataclasses import dataclass
@@ -18,10 +19,41 @@ from importlib.metadata import PackageNotFoundError, version
 from json import JSONDecodeError
 from typing import Any, Literal, TypeAlias, TypeVar, cast
 from urllib.parse import quote, urlencode, urlsplit
+from uuid import UUID
 
 import httpx
 from pydantic import BaseModel, TypeAdapter, ValidationError
 
+from .ai_catalog import AIResearchCatalog
+from .ai_tracking import (
+    AITrackingAcceptance,
+    AITrackingAcceptanceInput,
+    AITrackingEvidenceOptions,
+    AITrackingExport,
+    AITrackingPreview,
+    AITrackingPreviewInput,
+    AITrackingPrompt,
+    AITrackingPromptInput,
+    AITrackingPromptPatch,
+    AITrackingRun,
+    AITrackingRunInput,
+    AITrackingSample,
+    AITrackingSchedule,
+    AITrackingScheduleInput,
+    AITrackingSchedulePatch,
+    AITrackingSuggestions,
+    AITrackingTopic,
+    AITrackingTopicInput,
+    AITrackingTopicPatch,
+    AITrackingTrendOptions,
+    AITrackingTrends,
+)
+from .ai_tracking_suggestions import (
+    AITrackingSuggestionsGenerateInput,
+    AITrackingSuggestionsGeneration,
+    AITrackingSuggestionsPreview,
+    AITrackingSuggestionsPreviewInput,
+)
 from .errors import (
     BisibilityApiError,
     BisibilityConfigurationError,
@@ -177,6 +209,7 @@ from .models import (
     WebhookUpdateInput,
 )
 from .public_ids import PublicIdPrefix, require_public_id
+from .tracking_ids import require_tracking_id
 
 DEFAULT_BASE_URL = "https://bisibility.com/api/v1"
 RELATIVE_BASE_ORIGIN = "https://bisibility.local"
@@ -193,7 +226,7 @@ _MISSING = object()
 try:
     SDK_VERSION = version("bisibility")
 except PackageNotFoundError:  # pragma: no cover - source tree without installed metadata
-    SDK_VERSION = "0.12.0"
+    SDK_VERSION = "0.16.0"
 CLIENT_ID = f"bisibility-sdk-python/{SDK_VERSION}"
 AUTH_TOKEN_PREFIXES = ("bsb_key_live_", "bsb_key_test_", "bsb_pat_live_", "mig_")
 
@@ -315,13 +348,25 @@ def _dump_options(
 def _dump_body(
     value: BaseModel | Mapping[str, Any],
     model: type[BaseModel],
+    *,
+    exclude_none: bool | None = None,
 ) -> dict[str, Any]:
-    """Validate a mapping body before it can cross the HTTP boundary."""
+    """Validate a mapping body before it can cross the HTTP boundary.
+
+    ``exclude_none`` defaults to ``True`` for most payloads (dropping unset
+    optionals), except for :class:`CloudImportModel`. Patch payloads override
+    it to ``False`` so an explicit ``field=None`` is sent as a JSON ``null``
+    and clears the stored value, while fields the caller never set remain
+    omitted by :pydata:`exclude_unset`.
+    """
     parsed = value if isinstance(value, model) else model.model_validate(value)
+    effective_exclude_none = (
+        exclude_none if exclude_none is not None else not isinstance(parsed, CloudImportModel)
+    )
     return parsed.model_dump(
         mode="python",
         by_alias=True,
-        exclude_none=not isinstance(parsed, CloudImportModel),
+        exclude_none=effective_exclude_none,
         exclude_unset=True,
     )
 
@@ -604,6 +649,435 @@ class BisibilityClient:
             f"/projects/{_encoded_path_segment(project_id, 'prj')}/prompt-explorer",
             body=_dump_body(input, CompareAIPromptsOptions),
             response_model=DataResponse[AIAnalysisOutcome],
+            request_options=request_options,
+        )
+
+    def ai_tracking_suggestions_preview(
+        self,
+        project_id: str,
+        input: AITrackingSuggestionsPreviewInput | Mapping[str, Any],
+        request_options: RequestOptionsLike = None,
+    ) -> DataResponse[AITrackingSuggestionsPreview]:
+        parsed = AITrackingSuggestionsPreviewInput.model_validate(input)
+        body = parsed.model_dump(mode="json", exclude_unset=True)
+        if body.get("credential_connection_id") is None:
+            body.pop("credential_connection_id", None)
+        return self._request(
+            "POST",
+            f"/projects/{_encoded_path_segment(project_id, 'prj')}/ai-tracking/suggestions/preview",
+            body=body,
+            response_model=DataResponse[AITrackingSuggestionsPreview],
+            request_options=request_options,
+        )
+
+    def ai_tracking_suggestions_generate(
+        self,
+        project_id: str,
+        input: AITrackingSuggestionsGenerateInput | Mapping[str, Any],
+        request_options: RequestOptionsLike = None,
+    ) -> DataResponse[AITrackingSuggestionsGeneration]:
+        key = _coerce_request_options(request_options).idempotency_key
+        try:
+            if not key:
+                raise ValueError("missing key")
+            if not re.fullmatch(
+                r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}", key
+            ):
+                raise ValueError("invalid UUID format")
+            UUID(key)
+        except ValueError as exc:
+            raise BisibilityConfigurationError(
+                "A stable UUID Idempotency-Key is required."
+            ) from exc
+        parsed = AITrackingSuggestionsGenerateInput.model_validate(input)
+        return self._request(
+            "POST",
+            (
+                f"/projects/{_encoded_path_segment(project_id, 'prj')}"
+                "/ai-tracking/suggestions/generate"
+            ),
+            body=parsed.model_dump(mode="json", exclude_unset=True),
+            response_model=DataResponse[AITrackingSuggestionsGeneration],
+            request_options=request_options,
+        )
+
+    def list_ai_tracking_topics(
+        self,
+        project_id: str,
+        input: Mapping[str, Any] | None = None,
+        request_options: RequestOptionsLike = None,
+    ) -> ListResponse[AITrackingTopic]:
+        return self._request(
+            "GET",
+            f"/projects/{_encoded_path_segment(project_id, 'prj')}/ai-tracking/topics",
+            query=dict(input or {}),
+            response_model=ListResponse[AITrackingTopic],
+            request_options=request_options,
+        )
+
+    def create_ai_tracking_topic(
+        self,
+        project_id: str,
+        input: AITrackingTopicInput | Mapping[str, Any],
+        request_options: RequestOptionsLike = None,
+    ) -> DataResponse[AITrackingTopic]:
+        return self._request(
+            "POST",
+            f"/projects/{_encoded_path_segment(project_id, 'prj')}/ai-tracking/topics",
+            body=_dump_body(input, AITrackingTopicInput),
+            response_model=DataResponse[AITrackingTopic],
+            request_options=request_options,
+        )
+
+    def update_ai_tracking_topic(
+        self,
+        project_id: str,
+        id: str,
+        input: AITrackingTopicPatch | Mapping[str, Any],
+        request_options: RequestOptionsLike = None,
+    ) -> DataResponse[AITrackingTopic]:
+        return self._request(
+            "PATCH",
+            (
+                f"/projects/{_encoded_path_segment(project_id, 'prj')}/ai-tracking/topics/"
+                f"{require_tracking_id(id, 'ait')}"
+            ),
+            body=_dump_body(input, AITrackingTopicPatch, exclude_none=False),
+            response_model=DataResponse[AITrackingTopic],
+            request_options=request_options,
+        )
+
+    def archive_ai_tracking_topic(
+        self, project_id: str, id: str, request_options: RequestOptionsLike = None
+    ) -> DataResponse[AITrackingTopic]:
+        return self._request(
+            "DELETE",
+            (
+                f"/projects/{_encoded_path_segment(project_id, 'prj')}/ai-tracking/topics/"
+                f"{require_tracking_id(id, 'ait')}"
+            ),
+            response_model=DataResponse[AITrackingTopic],
+            request_options=request_options,
+        )
+
+    def list_ai_tracking_prompts(
+        self,
+        project_id: str,
+        input: Mapping[str, Any] | None = None,
+        request_options: RequestOptionsLike = None,
+    ) -> ListResponse[AITrackingPrompt]:
+        return self._request(
+            "GET",
+            f"/projects/{_encoded_path_segment(project_id, 'prj')}/ai-tracking/prompts",
+            query=dict(input or {}),
+            response_model=ListResponse[AITrackingPrompt],
+            request_options=request_options,
+        )
+
+    def create_ai_tracking_prompt(
+        self,
+        project_id: str,
+        input: AITrackingPromptInput | Mapping[str, Any],
+        request_options: RequestOptionsLike = None,
+    ) -> DataResponse[AITrackingPrompt]:
+        return self._request(
+            "POST",
+            f"/projects/{_encoded_path_segment(project_id, 'prj')}/ai-tracking/prompts",
+            body=_dump_body(input, AITrackingPromptInput),
+            response_model=DataResponse[AITrackingPrompt],
+            request_options=request_options,
+        )
+
+    def update_ai_tracking_prompt(
+        self,
+        project_id: str,
+        id: str,
+        input: AITrackingPromptPatch | Mapping[str, Any],
+        request_options: RequestOptionsLike = None,
+    ) -> DataResponse[AITrackingPrompt]:
+        return self._request(
+            "PATCH",
+            (
+                f"/projects/{_encoded_path_segment(project_id, 'prj')}/ai-tracking/prompts/"
+                f"{require_tracking_id(id, 'aip')}"
+            ),
+            body=_dump_body(input, AITrackingPromptPatch, exclude_none=False),
+            response_model=DataResponse[AITrackingPrompt],
+            request_options=request_options,
+        )
+
+    def archive_ai_tracking_prompt(
+        self, project_id: str, id: str, request_options: RequestOptionsLike = None
+    ) -> DataResponse[AITrackingPrompt]:
+        return self._request(
+            "DELETE",
+            (
+                f"/projects/{_encoded_path_segment(project_id, 'prj')}/ai-tracking/prompts/"
+                f"{require_tracking_id(id, 'aip')}"
+            ),
+            response_model=DataResponse[AITrackingPrompt],
+            request_options=request_options,
+        )
+
+    def list_ai_tracking_schedules(
+        self,
+        project_id: str,
+        input: Mapping[str, Any] | None = None,
+        request_options: RequestOptionsLike = None,
+    ) -> ListResponse[AITrackingSchedule]:
+        return self._request(
+            "GET",
+            f"/projects/{_encoded_path_segment(project_id, 'prj')}/ai-tracking/schedules",
+            query=dict(input or {}),
+            response_model=ListResponse[AITrackingSchedule],
+            request_options=request_options,
+        )
+
+    def create_ai_tracking_schedule(
+        self,
+        project_id: str,
+        input: AITrackingScheduleInput | Mapping[str, Any],
+        request_options: RequestOptionsLike = None,
+    ) -> DataResponse[AITrackingSchedule]:
+        return self._request(
+            "POST",
+            f"/projects/{_encoded_path_segment(project_id, 'prj')}/ai-tracking/schedules",
+            body=_dump_body(input, AITrackingScheduleInput),
+            response_model=DataResponse[AITrackingSchedule],
+            request_options=request_options,
+        )
+
+    def update_ai_tracking_schedule(
+        self,
+        project_id: str,
+        id: str,
+        input: AITrackingSchedulePatch | AITrackingScheduleInput | Mapping[str, Any],
+        request_options: RequestOptionsLike = None,
+    ) -> DataResponse[AITrackingSchedule]:
+        if isinstance(input, AITrackingScheduleInput):
+            # Normalize legacy callers who pass the full create input: the API
+            # treats the PATCH as a partial, so promote to the patch model
+            # before dumping and keep ``consent`` at the top level.
+            input = AITrackingSchedulePatch.model_validate(
+                input.model_dump(mode="python", exclude_unset=True, by_alias=False)
+            )
+        return self._request(
+            "PATCH",
+            (
+                f"/projects/{_encoded_path_segment(project_id, 'prj')}/ai-tracking/schedules/"
+                f"{require_tracking_id(id, 'ais')}"
+            ),
+            body=_dump_body(input, AITrackingSchedulePatch, exclude_none=False),
+            response_model=DataResponse[AITrackingSchedule],
+            request_options=request_options,
+        )
+
+    def archive_ai_tracking_schedule(
+        self, project_id: str, id: str, request_options: RequestOptionsLike = None
+    ) -> DataResponse[AITrackingSchedule]:
+        return self._request(
+            "DELETE",
+            (
+                f"/projects/{_encoded_path_segment(project_id, 'prj')}/ai-tracking/schedules/"
+                f"{require_tracking_id(id, 'ais')}"
+            ),
+            response_model=DataResponse[AITrackingSchedule],
+            request_options=request_options,
+        )
+
+    def preview_ai_tracking_run(
+        self,
+        project_id: str,
+        input: AITrackingPreviewInput | Mapping[str, Any],
+        request_options: RequestOptionsLike = None,
+    ) -> DataResponse[AITrackingPreview]:
+        return self._request(
+            "POST",
+            f"/projects/{_encoded_path_segment(project_id, 'prj')}/ai-tracking/runs/preview",
+            body=_dump_body(input, AITrackingPreviewInput),
+            response_model=DataResponse[AITrackingPreview],
+            request_options=request_options,
+        )
+
+    def create_ai_tracking_run(
+        self,
+        project_id: str,
+        input: AITrackingRunInput | Mapping[str, Any],
+        request_options: RequestOptionsLike = None,
+    ) -> DataResponse[AITrackingRun]:
+        if not _coerce_request_options(request_options).idempotency_key:
+            raise BisibilityConfigurationError("Idempotency-Key is required for tracking launch.")
+        return self._request(
+            "POST",
+            f"/projects/{_encoded_path_segment(project_id, 'prj')}/ai-tracking/runs",
+            body=_dump_body(input, AITrackingRunInput),
+            response_model=DataResponse[AITrackingRun],
+            request_options=request_options,
+        )
+
+    def list_ai_tracking_runs(
+        self,
+        project_id: str,
+        input: Mapping[str, Any] | None = None,
+        request_options: RequestOptionsLike = None,
+    ) -> ListResponse[AITrackingRun]:
+        return self._request(
+            "GET",
+            f"/projects/{_encoded_path_segment(project_id, 'prj')}/ai-tracking/runs",
+            query=dict(input or {}),
+            response_model=ListResponse[AITrackingRun],
+            request_options=request_options,
+        )
+
+    def get_ai_tracking_run(
+        self, project_id: str, id: str, request_options: RequestOptionsLike = None
+    ) -> DataResponse[AITrackingRun]:
+        return self._request(
+            "GET",
+            (
+                f"/projects/{_encoded_path_segment(project_id, 'prj')}/ai-tracking/runs/"
+                f"{require_tracking_id(id, 'air')}"
+            ),
+            response_model=DataResponse[AITrackingRun],
+            request_options=request_options,
+        )
+
+    def list_ai_tracking_samples(
+        self,
+        project_id: str,
+        id: str,
+        input: Mapping[str, Any] | None = None,
+        request_options: RequestOptionsLike = None,
+    ) -> ListResponse[AITrackingSample]:
+        return self._request(
+            "GET",
+            (
+                f"/projects/{_encoded_path_segment(project_id, 'prj')}/ai-tracking/runs/"
+                f"{require_tracking_id(id, 'air')}/samples"
+            ),
+            query=dict(input or {}),
+            response_model=ListResponse[AITrackingSample],
+            request_options=request_options,
+        )
+
+    def cancel_ai_tracking_run(
+        self, project_id: str, id: str, request_options: RequestOptionsLike = None
+    ) -> DataResponse[AITrackingRun]:
+        return self._request(
+            "POST",
+            (
+                f"/projects/{_encoded_path_segment(project_id, 'prj')}/ai-tracking/runs/"
+                f"{require_tracking_id(id, 'air')}/cancel"
+            ),
+            response_model=DataResponse[AITrackingRun],
+            request_options=request_options,
+        )
+
+    def retry_ai_tracking_run(
+        self,
+        project_id: str,
+        id: str,
+        input: AITrackingRunInput | Mapping[str, Any],
+        request_options: RequestOptionsLike = None,
+    ) -> DataResponse[AITrackingRun]:
+        if not _coerce_request_options(request_options).idempotency_key:
+            raise BisibilityConfigurationError("Idempotency-Key is required for tracking retry.")
+        return self._request(
+            "POST",
+            (
+                f"/projects/{_encoded_path_segment(project_id, 'prj')}/ai-tracking/runs/"
+                f"{require_tracking_id(id, 'air')}/retry"
+            ),
+            body=_dump_body(input, AITrackingRunInput),
+            response_model=DataResponse[AITrackingRun],
+            request_options=request_options,
+        )
+
+    def get_ai_tracking_history(
+        self,
+        project_id: str,
+        input: Mapping[str, Any] | None = None,
+        request_options: RequestOptionsLike = None,
+    ) -> ListResponse[AITrackingRun]:
+        return self._request(
+            "GET",
+            f"/projects/{_encoded_path_segment(project_id, 'prj')}/ai-tracking/history",
+            query=dict(input or {}),
+            response_model=ListResponse[AITrackingRun],
+            request_options=request_options,
+        )
+
+    def get_ai_tracking_trends(
+        self,
+        project_id: str,
+        input: AITrackingTrendOptions | Mapping[str, Any],
+        request_options: RequestOptionsLike = None,
+    ) -> DataResponse[AITrackingTrends]:
+        return self._request(
+            "GET",
+            f"/projects/{_encoded_path_segment(project_id, 'prj')}/ai-tracking/trends",
+            query=_dump_body(input, AITrackingTrendOptions),
+            response_model=DataResponse[AITrackingTrends],
+            request_options=request_options,
+        )
+
+    def export_ai_tracking_evidence(
+        self,
+        project_id: str,
+        input: AITrackingEvidenceOptions | Mapping[str, Any],
+        request_options: RequestOptionsLike = None,
+    ) -> DataResponse[AITrackingExport] | str:
+        payload = _dump_body(input, AITrackingEvidenceOptions)
+        if payload.get("format") == "csv":
+            return self._request(
+                "GET",
+                f"/projects/{_encoded_path_segment(project_id, 'prj')}/ai-tracking/export",
+                query=payload,
+                parse_as="text",
+                request_options=request_options,
+            )
+        return self._request(
+            "GET",
+            f"/projects/{_encoded_path_segment(project_id, 'prj')}/ai-tracking/export",
+            query=payload,
+            response_model=DataResponse[AITrackingExport],
+            request_options=request_options,
+        )
+
+    def suggest_ai_tracking_prompts(
+        self,
+        project_id: str,
+        request_options: RequestOptionsLike = None,
+    ) -> DataResponse[AITrackingSuggestions]:
+        return self._request(
+            "POST",
+            f"/projects/{_encoded_path_segment(project_id, 'prj')}/ai-tracking/suggestions",
+            body={},
+            response_model=DataResponse[AITrackingSuggestions],
+            request_options=request_options,
+        )
+
+    def accept_ai_tracking_suggestions(
+        self,
+        project_id: str,
+        input: AITrackingAcceptanceInput | Mapping[str, Any],
+        request_options: RequestOptionsLike = None,
+    ) -> DataResponse[AITrackingAcceptance]:
+        return self._request(
+            "POST",
+            f"/projects/{_encoded_path_segment(project_id, 'prj')}/ai-tracking/suggestions/accept",
+            body=_dump_body(input, AITrackingAcceptanceInput),
+            response_model=DataResponse[AITrackingAcceptance],
+            request_options=request_options,
+        )
+
+    def get_ai_research_catalog(
+        self, project_id: str, request_options: RequestOptionsLike = None
+    ) -> DataResponse[AIResearchCatalog]:
+        return self._request(
+            "GET",
+            f"/projects/{_encoded_path_segment(project_id, 'prj')}/ai-catalog",
+            response_model=DataResponse[AIResearchCatalog],
             request_options=request_options,
         )
 
@@ -1129,6 +1603,7 @@ class BisibilityClient:
                 "result_limit": filters.get("result_limit"),
                 "seed": filters.get("seed"),
             },
+            paid=not filters.get("estimate_only"),
             response_model=_KEYWORD_RESEARCH_RESPONSE,
             request_options=request_options,
         )
@@ -1160,6 +1635,7 @@ class BisibilityClient:
                 "fresh": filters.get("fresh"),
                 "max_cost_cents": filters.get("max_cost_cents"),
             },
+            paid=not filters.get("estimate_only"),
             response_model=DataResponse[BacklinksOutcome],
             request_options=request_options,
         )
@@ -2669,6 +3145,7 @@ class BisibilityClient:
         auth: bool = True,
         body: object = _MISSING,
         parse_as: Literal["text"] | None = None,
+        paid: bool = False,
         query: QueryParams | None = None,
         request_options: RequestOptionsLike = None,
         response_model: ResponseModel[T] | None = None,
@@ -2717,6 +3194,7 @@ class BisibilityClient:
             url,
             request_kwargs,
             accepted_status_codes=accepted_status_codes,
+            paid=paid,
         )
 
         if (
@@ -2736,6 +3214,7 @@ class BisibilityClient:
         request_kwargs: dict[str, Any],
         *,
         accepted_status_codes: frozenset[int] = frozenset(),
+        paid: bool = False,
     ) -> httpx.Response:
         headers: Mapping[str, str] = request_kwargs.get("headers") or {}
         retryable = method.upper() in IDEMPOTENT_METHODS or any(
@@ -2746,7 +3225,10 @@ class BisibilityClient:
             try:
                 response = self._client.request(method, url, **request_kwargs)
             except httpx.RequestError as exc:
-                if retries_left:
+                # A paid request may have reached the server before the response
+                # was lost; the backend treats these GETs as non-idempotent and a
+                # blind retry would risk double-billing the provider budget.
+                if retries_left and not paid:
                     _sleep(_backoff_seconds(attempt))
                     continue
                 raise BisibilityNetworkError(

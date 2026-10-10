@@ -617,3 +617,41 @@ client.update_provider_budgets(project_id, "dataforseo", {"own": {"app": None}, 
 ```
 
 The same methods are available with `await` on `AsyncBisibilityClient`.
+
+## AI tracking
+
+AI tracking methods manage project topics, immutable prompt revisions, disabled-by-default
+schedules, runs, samples, history, comparable trends, evidence exports, and editable prompt
+suggestions. Tracking resource IDs use `ait_`, `aip_`, `apr_`, `ais_`, `air_`, and `asm_`.
+Preview before launching paid work, pass the preview credential/budget/consent revisions, and
+provide explicit consent plus an `Idempotency-Key` for launch or retry. Preview never submits a
+provider task. Preserve the returned decimal USD strings, null amounts, unknown measurement
+states, original observation times, and cited sources. Model API tests and consumer observations
+remain distinct evidence sources.
+
+The free AI research catalog supplies current model and locale choices. Prompt comparison
+supports hard caps and explicitly consented provider actual-cost mode. Actual-cost mode requires
+`non_guaranteed_estimate_v1` acknowledgement and an advisory estimate limit; execution also
+requires the estimate credential reference and a stable UUID. An advisory limit is not a
+guaranteed maximum charge.
+
+Model prompt generation uses `ai_tracking_suggestions_preview` followed by
+`ai_tracking_suggestions_generate`. Review all five context fields, selected competitors, model
+and market. The complete reviewed snapshot must fit within 5000 serialized Unicode characters.
+Generation requires the unexpired frozen preview, explicit paid consent and a stable UUID
+`idempotency_key` request option. Forecasts are not guaranteed maximum costs. Accepted edits
+retain `generation_reference`; provider dataset prompts require `provider_dataset_reference`.
+Generated drafts have no measured popularity, and unknown USD costs remain null.
+
+## Response evidence compatibility
+
+Rank checks expose optional `observation_completeness`, and keywords expose optional
+`latest_check` and `latest_successful_check`. Older responses can omit these fields.
+Only complete coverage supports absence within the requested depth; a positive position
+remains valid with unknown or truncated coverage. A newer failure retains the prior success.
+
+Site backlinks normally have 12 history months. A successful partial snapshot has
+`history: []` and `history_unavailable: true`; preserve its summary, rows and confirmed cost.
+Page scope does not request history. Missing availability metadata uses the legacy default.
+A failed summary remains an HTTP error with current-response evidence in problem `details`:
+`cost_cents: null` is an unknown total, while `known_summary_cost_cents` is confirmed.

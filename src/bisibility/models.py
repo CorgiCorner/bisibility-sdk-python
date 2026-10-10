@@ -69,6 +69,7 @@ KeywordBulkOperation: TypeAlias = Literal[
 ]
 KeywordBulkStatus: TypeAlias = Literal["deleted", "not_found", "updated"]
 RankCheckStatus: TypeAlias = Literal["completed", "failed", "running"]
+ObservationCompleteness: TypeAlias = Literal["complete", "truncated_by_stop_on_match", "unknown"]
 RankHistoryExportFormat: TypeAlias = Literal["csv", "json"]
 RankHistoryGranularity: TypeAlias = Literal["daily", "weekly"]
 RankHistoryRange: TypeAlias = Literal["30", "90", "all"]
@@ -181,7 +182,10 @@ def _validate_keyset_cursor_v3(payload: JsonObject) -> None:
     prefix, separator, suffix = public_id.partition("_")
     if (
         separator != "_"
-        or prefix not in PUBLIC_ID_PREFIXES
+        or (
+            prefix not in PUBLIC_ID_PREFIXES
+            and prefix not in {"ait", "aip", "apr", "ais", "air", "asm"}
+        )
         or re.fullmatch(PUBLIC_ID_SUFFIX_PATTERN, suffix) is None
         or "T" not in timestamp
         or not timestamp.endswith("Z")
@@ -421,6 +425,26 @@ class KeywordSchedule(BisibilityModel):
     timezone: str
 
 
+class KeywordLatestCheck(BisibilityModel):
+    checked_at: str
+    error: str | None
+    error_code: str | None
+    id: CheckId
+    observation_completeness: ObservationCompleteness | None
+    position: int | None
+    run_id: RankCheckRunId | None
+    status: RankCheckStatus
+
+
+class KeywordLatestSuccessfulCheck(BisibilityModel):
+    checked_at: str
+    id: CheckId
+    observation_completeness: ObservationCompleteness | None
+    position: int | None
+    ranking_url: str | None
+    run_id: RankCheckRunId | None
+
+
 class Keyword(BisibilityModel):
     country: str
     created_at: str
@@ -429,7 +453,9 @@ class Keyword(BisibilityModel):
     intent: str | None = None
     language_code: str
     language_label: str
+    latest_check: KeywordLatestCheck | None = None
     latest_position: int | None
+    latest_successful_check: KeywordLatestSuccessfulCheck | None = None
     location: str
     location_key: str
     previous_position: int | None
@@ -655,7 +681,8 @@ class BacklinksSnapshot(BisibilityModel):
     cost_cents: float = Field(ge=0)
     fetched_at: str
     fetched_row_count: int = Field(ge=0)
-    history: list[BacklinksHistoryMonth] = Field(min_length=12, max_length=12)
+    history: list[BacklinksHistoryMonth] = Field(max_length=12)
+    history_unavailable: bool = False
     include_subdomains: bool
     provider: str
     rows: list[BacklinkRow]
@@ -663,6 +690,20 @@ class BacklinksSnapshot(BisibilityModel):
     target: str
     target_scope: BacklinksTargetScope
     total_rows_available: int = Field(ge=0)
+
+    @model_validator(mode="after")
+    def validate_history_availability(self) -> BacklinksSnapshot:
+        expected = (
+            0
+            if self.history_unavailable or (self.target_scope == "page" and not self.history)
+            else 12
+        )
+        if len(self.history) != expected:
+            raise ValueError(
+                f"history must contain {expected} months "
+                f"for history_unavailable={self.history_unavailable}"
+            )
+        return self
 
 
 BacklinksOutcome: TypeAlias = BacklinksEstimate | BacklinksSnapshot
@@ -935,6 +976,7 @@ class RankCheck(BisibilityModel):
     error: str | None
     id: CheckId
     keyword_id: KeywordId
+    observation_completeness: ObservationCompleteness | None = None
     position: int | None
     previous_position: int | None
     provider: str
@@ -2526,11 +2568,60 @@ class AnalyzeAIVisibilityOptions(AIResearchInput):
 
 
 class CompareAIPromptsOptions(AIResearchInput):
+    max_cost_cents: int | None = Field(default=None, ge=0, le=1000)  # type: ignore[assignment]
     prompt: Annotated[str, Field(min_length=1, max_length=500)]
     models: (
-        Annotated[list[Literal["gpt-4.1-mini", "gpt-4.1-nano"]], Field(min_length=1, max_length=2)]
+        Annotated[
+            list[Annotated[str, Field(pattern=r"^[A-Za-z0-9][A-Za-z0-9._:-]*$", max_length=120)]],
+            Field(min_length=1, max_length=2),
+        ]
         | None
     ) = None
+    cost_policy: Literal["hard_cap", "provider_actual_cost"] = "hard_cap"
+    actual_cost_acknowledgement: Literal["non_guaranteed_estimate_v1"] | None = None
+    estimated_cost_limit_cents: int | None = Field(default=None, ge=0, le=1000)
+    idempotency_key: str | None = None
+    estimate_credentials_ref: Annotated[str, Field(pattern=r"^[a-f0-9]{64}$")] | None = None
+    web_search: bool = False
+    country_iso_code: Annotated[str, Field(pattern=r"^[A-Z]{2}$")] | None = None
+    response_language: Annotated[str, Field(pattern=r"^[a-z]{2,3}(?:-[a-zA-Z0-9]{2,4})?$")] = "en"
+    max_output_tokens: int = Field(default=512, ge=16, le=4096)
+
+    @model_validator(mode="after")
+    def validate_cost_policy(self) -> CompareAIPromptsOptions:
+        if self.country_iso_code and not self.web_search:
+            raise ValueError("Country hints require web search.")
+        if self.models and len(set(self.models)) != len(self.models):
+            raise ValueError("Models must be distinct.")
+        if len(self.prompt.encode("utf-8")) > 2000:
+            raise ValueError("Prompt exceeds 2000 UTF-8 bytes.")
+        actual = [
+            self.actual_cost_acknowledgement,
+            self.estimated_cost_limit_cents,
+            self.idempotency_key,
+            self.estimate_credentials_ref,
+        ]
+        if self.cost_policy == "hard_cap":
+            if self.max_cost_cents is None or any(value is not None for value in actual):
+                raise ValueError(
+                    "Hard-cap mode requires a cap and excludes actual-cost consent fields."
+                )
+        else:
+            if (
+                self.max_cost_cents is not None
+                or self.actual_cost_acknowledgement is None
+                or self.estimated_cost_limit_cents is None
+            ):
+                raise ValueError("Actual cost requires explicit consent and an advisory limit.")
+            if not self.estimate_only and (
+                not self.idempotency_key or not self.estimate_credentials_ref
+            ):
+                raise ValueError("Execution requires estimate identity and a stable request ID.")
+            if self.idempotency_key:
+                from uuid import UUID
+
+                UUID(self.idempotency_key)
+        return self
 
 
 class AIAnalysisCitation(BisibilityModel):
@@ -2562,6 +2653,16 @@ class AIAnalysisResult(BisibilityModel):
 
 
 class AIAnalysisEstimate(BisibilityModel):
+    estimate_kind: Literal["forecast", "admission_bound"] | None = None
+    is_guaranteed_maximum: bool | None = None
+    credential_source: Literal["own", "hosted"] | None = None
+    estimate_credentials_ref: str | None = None
+    is_partial_estimate: bool | None = None
+    pricing_policy: Literal["legacy_dated", "current_catalog", "provider_actual_cost"] | None = None
+    pricing_checked_at: str | None = None
+    forecast_exclusions: list[str] | None = None
+    forecast_scope: Literal["tokens_and_base_only"] | None = None
+    forecast_assumptions: list[str] | None = None
     ok: Literal[True]
     estimate: Literal[True]
     estimated_cost_cents: float
@@ -2569,6 +2670,7 @@ class AIAnalysisEstimate(BisibilityModel):
 
 
 class AIAnalysisReport(BisibilityModel):
+    retry_blocked: bool | None = None
     ok: Literal[True]
     estimate: Literal[False]
     cached: bool
