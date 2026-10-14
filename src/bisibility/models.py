@@ -10,7 +10,6 @@ from typing import Annotated, Any, ClassVar, Generic, Literal, TypeAlias, TypeVa
 from pydantic import (
     AfterValidator,
     AliasChoices,
-    BaseModel,
     ConfigDict,
     Field,
     TypeAdapter,
@@ -18,6 +17,8 @@ from pydantic import (
     model_validator,
 )
 
+from .defaults_review import ProjectDefaultsReview
+from .model_base import BisibilityModel as BisibilityModel
 from .public_ids import (
     PUBLIC_ID_PREFIXES,
     PUBLIC_ID_SUFFIX_PATTERN,
@@ -44,6 +45,7 @@ from .public_ids import (
     WebhookEndpointId,
     require_public_id,
 )
+from .rank_history_report import RankHistoryReportResponse as RankHistoryReportResponse
 
 JsonObject: TypeAlias = dict[str, Any]
 Device: TypeAlias = Literal["desktop", "mobile"]
@@ -227,10 +229,6 @@ def _validate_cursor_v3(value: str) -> str:
 CursorV3: TypeAlias = Annotated[str, AfterValidator(_validate_cursor_v3)]
 
 
-class BisibilityModel(BaseModel):
-    model_config = ConfigDict(extra="allow", populate_by_name=True)
-
-
 class ProblemDetails(BisibilityModel):
     detail: str | None = None
     docs_url: str | None = None
@@ -310,6 +308,7 @@ class ProjectDefaultsPatch(BisibilityModel):
     are independent of the schedule: omitting either keeps its stored value.
     """
 
+    review: ProjectDefaultsReview | None = None
     city: str | None = None
     country: str | None = None
     cron_expression: str | None = None
@@ -969,7 +968,24 @@ class RankCheckAttempt(BisibilityModel):
     provider: str
 
 
+class RankCheckUsage(BisibilityModel):
+    quantity: float | None
+    status: Literal["confirmed", "unconfirmed"]
+    unit: Literal["operations", "cents"]
+
+
+class RankCheckRunMetadata(BisibilityModel):
+    id: RankCheckRunId
+    started_at: str | None
+    finished_at: str | None
+    status: str
+    trigger: str
+
+
 class RankCheck(BisibilityModel):
+    error_code: str | None = None
+    usage: RankCheckUsage | None = None
+    run: RankCheckRunMetadata | None = None
     attempts: list[RankCheckAttempt] | None = None
     checked_at: str
     cost_cents: float | None
@@ -1006,6 +1022,9 @@ class RunRankCheckResultAdapter:
 
 
 class RankHistoryExportRow(BisibilityModel):
+    provider: str | None = None
+    requested_depth: int | None = None
+    normalization_version: str | None = None
     checked_at: str
     id: CheckId
     keyword: str
@@ -2207,11 +2226,27 @@ class ListRankChecksOptions(PaginationOptions):
     until: str | date | datetime | None = None
 
 
-class RankHistoryExportOptions(PaginationOptions):
+class RankHistoryExportOptions(BisibilityModel):
+    cursor: str | None = Field(default=None, min_length=1, max_length=8192)
+    limit: int | None = Field(default=None, ge=1, le=200)
+    version: Literal["1", "2"] | None = None
+    stream: Literal["observations", "attempts"] | None = None
+    basis: Literal["observed_at", "recorded_at"] | None = None
+    from_: str | None = Field(
+        default=None, validation_alias=AliasChoices("from_", "from"), serialization_alias="from"
+    )
+    to: str | None = None
+    aggregation: Literal["none"] | None = None
     format: RankHistoryExportFormat | None = None
     granularity: RankHistoryGranularity | None = None
     keyword_ids: list[KeywordId] | None = Field(default=None, max_length=500)
     range: RankHistoryRange | None = None
+
+    @model_validator(mode="after")
+    def validate_export_version(self) -> RankHistoryExportOptions:
+        if self.cursor is not None and self.version != "2":
+            _validate_cursor_v3(self.cursor)
+        return self
 
 
 class ListSignalsOptions(PaginationOptions):

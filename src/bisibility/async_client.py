@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
+from dataclasses import replace
 from functools import wraps
 from typing import Any, Literal, ParamSpec, TypeVar, cast
 
@@ -31,6 +32,7 @@ from .client import (
     _retry_after_seconds,
     _UnsetTimeout,
 )
+from .defaults_review import ProjectDefaultsPreview, assert_defaults_support, validate_preview_scope
 from .errors import (
     BisibilityConfigurationError,
     BisibilityNetworkError,
@@ -49,6 +51,8 @@ from .models import (
     ListSignalsOptions,
     MigrationToken,
     PaginationOptions,
+    ProjectDefaults,
+    ProjectDefaultsPatch,
     Provider,
     RankCheck,
     RankCheckRunQueued,
@@ -203,7 +207,68 @@ class AsyncBisibilityClient(BisibilityClient):
     get_project_defaults = _asyncify(BisibilityClient.get_project_defaults)  # type: ignore[assignment]
     get_project_overview = _asyncify(BisibilityClient.get_project_overview)  # type: ignore[assignment]
     match_project_keywords = _asyncify(BisibilityClient.match_project_keywords)  # type: ignore[assignment]
-    update_project_defaults = _asyncify(BisibilityClient.update_project_defaults)  # type: ignore[assignment]
+
+    async def update_project_defaults(  # type: ignore[override]
+        self,
+        project_id: str,
+        input: ProjectDefaultsPatch | Mapping[str, Any],
+        request_options: RequestOptionsLike = None,
+    ) -> ProjectDefaults:
+        patch = (
+            input
+            if isinstance(input, ProjectDefaultsPatch)
+            else ProjectDefaultsPatch.model_validate(input)
+        )
+        opts = _coerce_request_options(request_options)
+        if patch.review is not None:
+            require_public_id(project_id, "prj", field="project_id")
+            key = patch.review.idempotency_key.strip()
+            if (
+                key != patch.review.idempotency_key
+                or not (8 <= len(key) <= 128)
+                or any(ord(char) < 32 or ord(char) == 127 for char in key)
+            ):
+                raise BisibilityConfigurationError("Invalid defaults review command key.")
+            if opts.idempotency_key is not None and opts.idempotency_key.strip() != key:
+                raise BisibilityConfigurationError(
+                    "Defaults review and request command keys must agree."
+                )
+            assert_defaults_support(await self.get_capabilities(request_options))
+            opts = replace(opts, idempotency_key=key)
+        return await self._request(
+            "PATCH",
+            f"/projects/{_encoded_path_segment(project_id, 'prj')}/defaults",
+            body=patch,
+            response_model=ProjectDefaults,
+            request_options=opts,
+        )
+
+    async def preview_project_defaults(  # type: ignore[override]
+        self,
+        project_id: str,
+        input: ProjectDefaultsPatch | Mapping[str, Any],
+        request_options: RequestOptionsLike = None,
+    ) -> ProjectDefaultsPreview:
+        patch = (
+            input
+            if isinstance(input, ProjectDefaultsPatch)
+            else ProjectDefaultsPatch.model_validate(input)
+        )
+        if patch.review is not None:
+            raise BisibilityConfigurationError("Preview accepts draft settings only.")
+        require_public_id(project_id, "prj", field="project_id")
+        assert_defaults_support(await self.get_capabilities(request_options))
+        preview = await self._request(
+            "PATCH",
+            f"/projects/{_encoded_path_segment(project_id, 'prj')}/defaults",
+            body=patch,
+            query={"preview_only": "true"},
+            suppress_idempotency_key=True,
+            response_model=ProjectDefaultsPreview,
+            request_options=request_options,
+        )
+        return validate_preview_scope(preview, project_id)
+
     list_api_keys = _asyncify(BisibilityClient.list_api_keys)  # type: ignore[assignment]
     create_api_key = _asyncify(BisibilityClient.create_api_key)  # type: ignore[assignment]
     revoke_api_key = _asyncify(BisibilityClient.revoke_api_key)  # type: ignore[assignment]
@@ -245,6 +310,8 @@ class AsyncBisibilityClient(BisibilityClient):
     delete_keyword = _asyncify(BisibilityClient.delete_keyword)  # type: ignore[assignment]
     bulk_update_keywords = _asyncify(BisibilityClient.bulk_update_keywords)  # type: ignore[assignment]
     list_rank_checks = _asyncify(BisibilityClient.list_rank_checks)  # type: ignore[assignment]
+    list_rank_check_runs = _asyncify(BisibilityClient.list_rank_check_runs)  # type: ignore[assignment]
+    get_rank_check_run = _asyncify(BisibilityClient.get_rank_check_run)  # type: ignore[assignment]
     run_rank_check = _asyncify(BisibilityClient.run_rank_check)  # type: ignore[assignment]
 
     async def run_rank_check_and_wait(  # type: ignore[override]
@@ -290,6 +357,13 @@ class AsyncBisibilityClient(BisibilityClient):
         BisibilityClient.mark_project_alerts_read
     )
     export_rank_history = _asyncify(BisibilityClient.export_rank_history)  # type: ignore[assignment]
+    list_local_monitor_runs = _asyncify(BisibilityClient.list_local_monitor_runs)  # type: ignore[assignment]
+    get_local_monitor_run_result = _asyncify(BisibilityClient.get_local_monitor_run_result)  # type: ignore[assignment]
+    list_local_monitor_point_listings = _asyncify(
+        BisibilityClient.list_local_monitor_point_listings
+    )  # type: ignore[assignment]
+    list_local_monitor_point_history = _asyncify(BisibilityClient.list_local_monitor_point_history)  # type: ignore[assignment]
+    export_local_monitor_run = _asyncify(BisibilityClient.export_local_monitor_run)  # type: ignore[assignment]
     list_sitemap_monitors = _asyncify(BisibilityClient.list_sitemap_monitors)  # type: ignore[assignment]
     update_sitemap_monitor = _asyncify(BisibilityClient.update_sitemap_monitor)  # type: ignore[assignment]
     list_team_members = _asyncify(BisibilityClient.list_team_members)  # type: ignore[assignment]

@@ -12,7 +12,7 @@ from __future__ import annotations
 import re
 import time
 from collections.abc import Callable, Iterator, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import date, datetime, timezone
 from email.utils import parsedate_to_datetime
 from importlib.metadata import PackageNotFoundError, version
@@ -54,12 +54,28 @@ from .ai_tracking_suggestions import (
     AITrackingSuggestionsPreview,
     AITrackingSuggestionsPreviewInput,
 )
+from .defaults_review import (
+    ProjectDefaultsPreview,
+    assert_defaults_support,
+    validate_preview_scope,
+)
 from .errors import (
     BisibilityApiError,
     BisibilityConfigurationError,
     BisibilityNetworkError,
     BisibilityResponseError,
     BisibilityTimeoutError,
+)
+from .local_monitor_models_0 import (
+    LocalMonitorPointHistoryResponse,
+    LocalMonitorRunHistoryResponse,
+    LocalMonitorRunResultResponse,
+)
+from .local_monitor_models_1 import LocalMonitorPointListingsResponse, LocalMonitorPointReport
+from .local_monitor_options import (
+    LocalMonitorExportOptions,
+    LocalMonitorHistoryOptions,
+    LocalMonitorReadOptions,
 )
 from .models import (
     AddCompetitorInput,
@@ -170,6 +186,7 @@ from .models import (
     RankHistoryExportOptions,
     RankHistoryExportResponse,
     RankHistoryExportRow,
+    RankHistoryReportResponse,
     ReadinessResponse,
     RevokedTeamInvite,
     RunRankCheckInput,
@@ -209,6 +226,12 @@ from .models import (
     WebhookUpdateInput,
 )
 from .public_ids import PublicIdPrefix, require_public_id
+from .rank_check_runs import (
+    ListRankCheckRunsOptions,
+    RankCheckRunRead,
+    _run_list_response_adapter,
+    _run_response_adapter,
+)
 from .tracking_ids import require_tracking_id
 
 DEFAULT_BASE_URL = "https://bisibility.com/api/v1"
@@ -226,7 +249,7 @@ _MISSING = object()
 try:
     SDK_VERSION = version("bisibility")
 except PackageNotFoundError:  # pragma: no cover - source tree without installed metadata
-    SDK_VERSION = "0.16.0"
+    SDK_VERSION = "0.17.0"
 CLIENT_ID = f"bisibility-sdk-python/{SDK_VERSION}"
 AUTH_TOKEN_PREFIXES = ("bsb_key_live_", "bsb_key_test_", "bsb_pat_live_", "mig_")
 
@@ -1392,13 +1415,60 @@ class BisibilityClient:
         When ``location_key`` is omitted, ``country`` and ``device`` must be provided
         together.
         """
+        patch = (
+            input
+            if isinstance(input, ProjectDefaultsPatch)
+            else ProjectDefaultsPatch.model_validate(input)
+        )
+        opts = _coerce_request_options(request_options)
+        if patch.review is not None:
+            require_public_id(project_id, "prj", field="project_id")
+            key = patch.review.idempotency_key.strip()
+            if (
+                key != patch.review.idempotency_key
+                or not (8 <= len(key) <= 128)
+                or any(ord(char) < 32 or ord(char) == 127 for char in key)
+            ):
+                raise BisibilityConfigurationError("Invalid defaults review command key.")
+            if opts.idempotency_key is not None and opts.idempotency_key.strip() != key:
+                raise BisibilityConfigurationError(
+                    "Defaults review and request command keys must agree."
+                )
+            assert_defaults_support(self.get_capabilities(request_options))
+            opts = replace(opts, idempotency_key=key)
         return self._request(
             "PATCH",
             f"/projects/{_encoded_path_segment(project_id, 'prj')}/defaults",
-            body=input,
+            body=patch,
             response_model=ProjectDefaults,
+            request_options=opts,
+        )
+
+    def preview_project_defaults(
+        self,
+        project_id: str,
+        input: ProjectDefaultsPatch | Mapping[str, Any],
+        request_options: RequestOptionsLike = None,
+    ) -> ProjectDefaultsPreview:
+        patch = (
+            input
+            if isinstance(input, ProjectDefaultsPatch)
+            else ProjectDefaultsPatch.model_validate(input)
+        )
+        if patch.review is not None:
+            raise BisibilityConfigurationError("Preview accepts draft settings only.")
+        require_public_id(project_id, "prj", field="project_id")
+        assert_defaults_support(self.get_capabilities(request_options))
+        preview = self._request(
+            "PATCH",
+            f"/projects/{_encoded_path_segment(project_id, 'prj')}/defaults",
+            body=patch,
+            query={"preview_only": "true"},
+            suppress_idempotency_key=True,
+            response_model=ProjectDefaultsPreview,
             request_options=request_options,
         )
+        return validate_preview_scope(preview, project_id)
 
     def list_api_keys(
         self,
@@ -1849,6 +1919,38 @@ class BisibilityClient:
             request_options=request_options,
         )
 
+    def list_rank_check_runs(
+        self,
+        project_id: str,
+        options: ListRankCheckRunsOptions | Mapping[str, Any] | None = None,
+        request_options: RequestOptionsLike = None,
+    ) -> ListResponse[RankCheckRunRead]:
+        """Read project runs, including unlaunched and deferred outcomes."""
+        filters = _dump_options(options, ListRankCheckRunsOptions)
+        return self._request(
+            "GET",
+            f"/projects/{_encoded_path_segment(project_id, 'prj')}/rank-check-runs",
+            query=filters,
+            response_model=_run_list_response_adapter(project_id),
+            request_options=request_options,
+        )
+
+    def get_rank_check_run(
+        self,
+        project_id: str,
+        run_id: str,
+        request_options: RequestOptionsLike = None,
+    ) -> RankCheckRunRead:
+        """Read an existing run without launching another measurement."""
+        project = _encoded_path_segment(project_id, "prj")
+        run = _encoded_path_segment(run_id, "rcr")
+        return self._request(
+            "GET",
+            f"/projects/{project}/rank-check-runs/{run}",
+            response_model=_run_response_adapter(project_id, run_id),
+            request_options=request_options,
+        )
+
     def run_rank_check(
         self,
         keyword_id: str,
@@ -2133,7 +2235,7 @@ class BisibilityClient:
         project_id: str,
         options: RankHistoryExportOptions | Mapping[str, Any] | None = None,
         request_options: RequestOptionsLike = None,
-    ) -> RankHistoryExportResponse | str:
+    ) -> RankHistoryExportResponse | RankHistoryReportResponse | str:
         filters = _dump_options(options, RankHistoryExportOptions)
         path = f"/projects/{_encoded_path_segment(project_id, 'prj')}/exports/rank-history"
         query = {
@@ -2143,6 +2245,12 @@ class BisibilityClient:
             "keyword_id": filters.get("keyword_ids"),
             "limit": filters.get("limit"),
             "range": filters.get("range"),
+            "version": filters.get("version"),
+            "stream": filters.get("stream"),
+            "basis": filters.get("basis"),
+            "from": filters.get("from_"),
+            "to": filters.get("to"),
+            "aggregation": filters.get("aggregation"),
         }
         if filters.get("format") == "csv":
             return self._request(
@@ -2152,11 +2260,160 @@ class BisibilityClient:
                 query=query,
                 request_options=request_options,
             )
+        if filters.get("version") == "2":
+            return self._request(
+                "GET",
+                path,
+                query=query,
+                response_model=RankHistoryReportResponse,
+                request_options=request_options,
+            )
         return self._request(
             "GET",
             path,
             query=query,
             response_model=ListResponse[RankHistoryExportRow],
+            request_options=request_options,
+        )
+
+    def list_local_monitor_runs(
+        self,
+        project_id: str,
+        monitor_id: str,
+        options: LocalMonitorHistoryOptions | Mapping[str, Any] | None = None,
+        request_options: RequestOptionsLike = None,
+    ) -> LocalMonitorRunHistoryResponse:
+        filters = _dump_options(
+            options.model_dump(mode="python", by_alias=True, exclude_none=True, exclude_unset=True)
+            if isinstance(options, BaseModel)
+            else options,
+            LocalMonitorHistoryOptions,
+        )
+        project = _encoded_path_segment(project_id, "prj")
+        monitor = _encoded_path_segment(monitor_id, "lmn")
+        path = f"/projects/{project}/local-monitors/{monitor}/runs"
+        query = {("from" if key == "from_" else key): value for key, value in filters.items()}
+        return self._request(
+            "GET",
+            path,
+            query=query,
+            response_model=LocalMonitorRunHistoryResponse,
+            request_options=request_options,
+        )
+
+    def get_local_monitor_run_result(
+        self,
+        project_id: str,
+        monitor_id: str,
+        run_id: str,
+        options: LocalMonitorReadOptions | Mapping[str, Any] | None = None,
+        request_options: RequestOptionsLike = None,
+    ) -> LocalMonitorRunResultResponse:
+        filters = _dump_options(
+            options.model_dump(mode="python", by_alias=True, exclude_none=True, exclude_unset=True)
+            if isinstance(options, BaseModel)
+            else options,
+            LocalMonitorReadOptions,
+        )
+        project = _encoded_path_segment(project_id, "prj")
+        monitor = _encoded_path_segment(monitor_id, "lmn")
+        run = _encoded_path_segment(run_id, "lmr")
+        path = f"/projects/{project}/local-monitors/{monitor}/runs/{run}/results"
+        query = {("from" if key == "from_" else key): value for key, value in filters.items()}
+        return self._request(
+            "GET",
+            path,
+            query=query,
+            response_model=LocalMonitorRunResultResponse,
+            request_options=request_options,
+        )
+
+    def list_local_monitor_point_listings(
+        self,
+        project_id: str,
+        monitor_id: str,
+        run_id: str,
+        target_id: str,
+        options: LocalMonitorReadOptions | Mapping[str, Any] | None = None,
+        request_options: RequestOptionsLike = None,
+    ) -> LocalMonitorPointListingsResponse:
+        filters = _dump_options(
+            options.model_dump(mode="python", by_alias=True, exclude_none=True, exclude_unset=True)
+            if isinstance(options, BaseModel)
+            else options,
+            LocalMonitorReadOptions,
+        )
+        project = _encoded_path_segment(project_id, "prj")
+        monitor = _encoded_path_segment(monitor_id, "lmn")
+        run = _encoded_path_segment(run_id, "lmr")
+        target = _encoded_path_segment(target_id, "lmt")
+        path = f"/projects/{project}/local-monitors/{monitor}/runs/{run}/points/{target}/listings"
+        query = {("from" if key == "from_" else key): value for key, value in filters.items()}
+        return self._request(
+            "GET",
+            path,
+            query=query,
+            response_model=LocalMonitorPointListingsResponse,
+            request_options=request_options,
+        )
+
+    def list_local_monitor_point_history(
+        self,
+        project_id: str,
+        monitor_id: str,
+        run_id: str,
+        target_id: str,
+        options: LocalMonitorHistoryOptions | Mapping[str, Any] | None = None,
+        request_options: RequestOptionsLike = None,
+    ) -> LocalMonitorPointHistoryResponse:
+        filters = _dump_options(
+            options.model_dump(mode="python", by_alias=True, exclude_none=True, exclude_unset=True)
+            if isinstance(options, BaseModel)
+            else options,
+            LocalMonitorHistoryOptions,
+        )
+        project = _encoded_path_segment(project_id, "prj")
+        monitor = _encoded_path_segment(monitor_id, "lmn")
+        run = _encoded_path_segment(run_id, "lmr")
+        target = _encoded_path_segment(target_id, "lmt")
+        path = f"/projects/{project}/local-monitors/{monitor}/runs/{run}/points/{target}/history"
+        query = {("from" if key == "from_" else key): value for key, value in filters.items()}
+        return self._request(
+            "GET",
+            path,
+            query=query,
+            response_model=LocalMonitorPointHistoryResponse,
+            request_options=request_options,
+        )
+
+    def export_local_monitor_run(
+        self,
+        project_id: str,
+        monitor_id: str,
+        run_id: str,
+        options: LocalMonitorExportOptions | Mapping[str, Any] | None = None,
+        request_options: RequestOptionsLike = None,
+    ) -> LocalMonitorPointReport | str:
+        filters = _dump_options(
+            options.model_dump(mode="python", by_alias=True, exclude_none=True, exclude_unset=True)
+            if isinstance(options, BaseModel)
+            else options,
+            LocalMonitorExportOptions,
+        )
+        project = _encoded_path_segment(project_id, "prj")
+        monitor = _encoded_path_segment(monitor_id, "lmn")
+        run = _encoded_path_segment(run_id, "lmr")
+        path = f"/projects/{project}/local-monitors/{monitor}/runs/{run}/export"
+        query = {("from" if key == "from_" else key): value for key, value in filters.items()}
+        if filters.get("format") == "csv":
+            return self._request(
+                "GET", path, query=query, parse_as="text", request_options=request_options
+            )
+        return self._request(
+            "GET",
+            path,
+            query=query,
+            response_model=LocalMonitorPointReport,
             request_options=request_options,
         )
 

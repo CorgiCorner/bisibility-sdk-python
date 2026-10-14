@@ -26,6 +26,9 @@ PublicIdPrefix: TypeAlias = Literal[
     "inv",
     "key",
     "kw",
+    "lmn",
+    "lmr",
+    "lmt",
     "mbr",
     "ntf",
     "pat",
@@ -55,6 +58,9 @@ PUBLIC_ID_PREFIXES: frozenset[PublicIdPrefix] = frozenset(
         "inv",
         "key",
         "kw",
+        "lmn",
+        "lmr",
+        "lmt",
         "mbr",
         "ntf",
         "pat",
@@ -114,3 +120,7 @@ ViewId: TypeAlias = Annotated[str, Field(pattern=public_id_pattern("viw"))]
 WebhookEndpointId: TypeAlias = Annotated[str, Field(pattern=public_id_pattern("we"))]
 
 AgentReportId: TypeAlias = Annotated[str, Field(pattern=public_id_pattern("agr"))]
+
+LocalMonitorId: TypeAlias = Annotated[str, Field(pattern=public_id_pattern("lmn"))]
+LocalMonitorRunId: TypeAlias = Annotated[str, Field(pattern=public_id_pattern("lmr"))]
+LocalMeasurementTargetId: TypeAlias = Annotated[str, Field(pattern=public_id_pattern("lmt"))]

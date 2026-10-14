@@ -655,3 +655,57 @@ Site backlinks normally have 12 history months. A successful partial snapshot ha
 Page scope does not request history. Missing availability metadata uses the legacy default.
 A failed summary remains an HTTP error with current-response evidence in problem `details`:
 `cost_cents: null` is an unknown total, while `known_summary_cost_cents` is confirmed.
+
+## Read rank-check runs
+
+`list_rank_check_runs(project_id, options={"segment": "history", "limit": 50})`
+and `get_rank_check_run(project_id, run_id)` read existing project runs on both
+sync and async clients. They include blocked, cancelled and deferred outcomes
+without requiring a completed rank-check row or launching a measurement. Lists
+support `history` or `planned` segments, comma-separated `status`, `cursor` and
+limits from 1 to 200. Preserve the returned cursor when continuing a list.
+The typed run exposes terminal and polling state, nullable usage and native
+estimates, and counts; future status and outcome values remain readable.
+
+## Versioned retained history export
+
+Opt in with version 2 to retain report quality, metric versions, frozen selection
+and signed continuation cursors. Keep stream, basis, from/to and keyword selection
+unchanged on every page. The default remains legacy v1 rows. Observations include
+bounded normalized items; opaque CID strings retain all original digits. The
+recorded-at attempts stream also contains actual run/item variants without checks,
+including cancelled, deferred and blocked outcomes. Full-project exports retain
+explicit project-only runs; selected exports report unresolved membership exclusions.
+CSV contains a complete bounded report manifest and accepts no cursor. Oversized
+sources fail with 413, and changed signed snapshots fail with 409.
+
+See the [rank-history contract](https://bisibility.com/docs/api/rank-history).
+
+### Retained Local monitor reads
+
+`list_local_monitor_runs`, `get_local_monitor_run_result`,
+`list_local_monitor_point_listings`, `list_local_monitor_point_history`, and
+`export_local_monitor_run` are available on the sync and async clients.
+They only issue GET requests: setup, paid collection, schedules and rematching are separate actions.
+Use `lmn_…` monitor, `lmr_…` run and `lmt_…` target IDs with the project's `prj_…` ID.
+Selections accept exact UTC millisecond instants (`2026-10-12T12:00:00.000Z`);
+history cursors are opaque strings of 1–8000 characters. Do not reconstruct them.
+
+```python
+result = client.get_local_monitor_run_result(project_id, monitor_id, run_id,
+    options={"as_of": "2026-10-12T12:00:00.000Z"})
+csv = client.export_local_monitor_run(project_id, monitor_id, run_id,
+    options={"version": "1", "format": "csv"})
+```
+
+History time is `occurrence_created_at`, not provider observation time.
+Nullable timestamps/ranks/axes and freshness `policy_epoch` remain explicit;
+unknown or stale evidence is never replaced with absence or rank zero.
+CID stays an opaque string, including values beyond safe numeric ranges.
+Response metadata can add new values without making old clients reject the page;
+report version and resource ID namespaces remain strict.
+JSON export preserves its camelCase retained-report contract; CSV is the exact
+server export text. All five methods honor the existing authentication, timeout,
+cancellation, error and request-options behavior.
+
+Project defaults previews require the server capability `reviewed_project_defaults: v1`. Call `preview_project_defaults` with a draft, show its signed preview and impact, then explicitly submit the same draft with `ProjectDefaultsReview`. Preserve the returned revision as a string and reuse one command key for retries. Async clients expose the same two-step flow. Preview never changes project settings.

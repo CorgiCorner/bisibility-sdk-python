@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## 0.17.0 - 2026-10-14
+
+- Add capability-checked project defaults previews and explicit signed review commands; previews leave settings unchanged.
+
+- Add retained rank-check run reads and versioned rank-history reports with quality, scope, original timestamps, and stable pagination.
+- Add typed Local monitor history, results, point listings, and exports without starting paid checks.
+
 ## 0.16.0 - 2026-10-10
 
 - Add typed project AI tracking operations for topics, immutable prompt revisions, schedules,
