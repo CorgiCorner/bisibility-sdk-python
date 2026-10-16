@@ -8,7 +8,7 @@
 > [API reference](https://bisibility.com/docs/api/overview) ·
 > [Roadmap](https://bisibility.com/roadmap)
 >
-> Current versions are listed on [PyPI](https://pypi.org/project/bisibility/).
+> SDK version: **0.17.1**. Published versions are listed on [PyPI](https://pypi.org/project/bisibility/).
 
 Python SDK for the Bisibility REST API.
 
@@ -379,6 +379,31 @@ print(snapshot.summary.backlinks_total, len(snapshot.rows))
 `cached_until`, `provider`, `cost_cents`, `estimate`, and `estimated_cost_cents`, and
 nothing else. `BacklinksSnapshot` carries the report and no estimate fields.
 `load_more_backlink_rows` always answers with a snapshot.
+
+To append rows, pass the opaque `snapshot_ref` from the latest successful analyze
+or load-more response unchanged. Although optional in the SDK for compatibility,
+the server requires a current reference. Missing or stale references raise
+`BisibilityApiError` with HTTP 409 and problem type
+`https://bisibility.com/problems/snapshot_expired` before any paid I/O.
+Each append returns only newly fetched rows and a replacement reference:
+
+```python
+from bisibility import LoadMoreBacklinkRowsOptions
+
+all_rows = list(snapshot.rows)
+snapshot = bisibility.load_more_backlink_rows(
+    project_id,
+    LoadMoreBacklinkRowsOptions(
+        target=snapshot.target,
+        target_scope=snapshot.target_scope,
+        include_subdomains=snapshot.include_subdomains,
+        limit=100,
+        snapshot_ref=snapshot.snapshot_ref,
+    ),
+).data
+all_rows.extend(snapshot.rows)
+# Use this updated snapshot.snapshot_ref for the next load-more request.
+```
 
 `research_keywords` works the same way, without the `data` envelope:
 

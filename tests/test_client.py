@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import re
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -16,6 +17,7 @@ from bisibility import (
     AlertRuleInput,
     AnalyzeBacklinksOptions,
     ApiKeyCreateInput,
+    AsyncBisibilityClient,
     BacklinksEstimate,
     BacklinksSnapshot,
     BisibilityApiError,
@@ -1387,8 +1389,8 @@ def test_sends_bearer_auth_and_default_headers_on_protected_requests() -> None:
     assert request.headers["Authorization"] == f"Bearer {API_KEY}"
     assert request.headers["X-Client"] == "sdk-test"
     assert request.headers["X-Request"] == "request"
-    assert request.headers["User-Agent"] == "bisibility-sdk-python/0.17.0"
-    assert request.headers["X-Bisibility-Client"] == "bisibility-sdk-python/0.17.0"
+    assert request.headers["User-Agent"] == "bisibility-sdk-python/0.17.1"
+    assert request.headers["X-Bisibility-Client"] == "bisibility-sdk-python/0.17.1"
     assert request.headers["X-Bisibility-Source"] == "sdk"
     assert request.extensions["timeout"] == {
         "connect": 30.0,
@@ -1406,7 +1408,7 @@ def test_preserves_user_agent_and_allows_disabling_timeout() -> None:
 
     request = queue.requests[-1]
     assert request.headers["User-Agent"] == "my-app/1.0"
-    assert request.headers["X-Bisibility-Client"] == "bisibility-sdk-python/0.17.0"
+    assert request.headers["X-Bisibility-Client"] == "bisibility-sdk-python/0.17.1"
     assert request.headers["X-Bisibility-Source"] == "cli"
     assert request.extensions["timeout"] == {
         "connect": None,
@@ -2646,6 +2648,112 @@ def test_loads_more_backlink_rows_with_snake_case_body() -> None:
         "include_subdomains": True,
         "limit": 100,
     }
+
+
+
+@pytest.mark.parametrize("is_async", [False, True])
+@pytest.mark.parametrize("as_mapping", [False, True])
+def test_backlinks_snapshot_ref_round_trip(is_async: bool, as_mapping: bool) -> None:
+    references = ["opaque/analyze+revision=1", "opaque/append+revision=2", "opaque/revision=3"]
+    queue = QueueTransport([
+        json_response({"data": backlinks_snapshot(target="example.com", rows=[], snapshot_ref=ref)})
+        for ref in references
+    ])
+    client_type = AsyncBisibilityClient if is_async else BisibilityClient
+    client = client_type(
+        api_key=API_KEY, base_url="https://api.example.com/api/v1", transport=queue.transport()
+    )
+
+    async def scenario() -> None:
+        try:
+            result = client.analyze_backlinks(
+                "prj_a00000000000000000000000", {"target": "example.com"}
+            )
+            if is_async:
+                result = await result
+            assert isinstance(result.data, BacklinksSnapshot)
+            assert result.data.snapshot_ref == references[0]
+            for ref in references[1:]:
+                options = LoadMoreBacklinkRowsOptions(
+                    target="example.com", target_scope="site", include_subdomains=True,
+                    limit=100, snapshot_ref=result.data.snapshot_ref,
+                )
+                result = client.load_more_backlink_rows(
+                    "prj_a00000000000000000000000",
+                    options.model_dump(exclude_unset=True) if as_mapping else options,
+                )
+                if is_async:
+                    result = await result
+                assert isinstance(result.data, BacklinksSnapshot)
+                assert result.data.snapshot_ref == ref
+        finally:
+            if is_async:
+                await client.aclose()
+            else:
+                client.close()
+
+    asyncio.run(scenario())
+    assert [request_json(request) for request in queue.requests[1:]] == [
+        {"target": "example.com", "target_scope": "site", "include_subdomains": True,
+         "limit": 100, "snapshot_ref": ref}
+        for ref in references[:2]
+    ]
+    assert all(request.method == "POST" for request in queue.requests[1:])
+
+
+@pytest.mark.parametrize("is_async", [False, True])
+@pytest.mark.parametrize("snapshot_ref", [None, "stale-reference"])
+def test_backlinks_snapshot_expired_typed_error(is_async: bool, snapshot_ref: str | None) -> None:
+    problem = {
+        "type": "https://bisibility.com/problems/snapshot_expired",
+        "title": "Snapshot expired", "status": 409,
+        "detail": "The snapshot reference is missing or stale.",
+    }
+    queue = QueueTransport([
+        json_response(problem, 409, {"Content-Type": "application/problem+json"})
+    ])
+    client_type = AsyncBisibilityClient if is_async else BisibilityClient
+    client = client_type(
+        api_key=API_KEY, base_url="https://api.example.com/api/v1", transport=queue.transport()
+    )
+
+    async def scenario() -> None:
+        try:
+            with pytest.raises(BisibilityApiError) as raised:
+                result = client.load_more_backlink_rows(
+                    "prj_a00000000000000000000000",
+                    LoadMoreBacklinkRowsOptions(
+                        target="example.com", target_scope="site", include_subdomains=True,
+                        limit=100, snapshot_ref=snapshot_ref,
+                    ),
+                )
+                if is_async:
+                    await result
+            assert raised.value.status == 409
+            assert raised.value.problem is not None
+            assert raised.value.problem.type == problem["type"]
+            assert raised.value.problem.detail == problem["detail"]
+        finally:
+            if is_async:
+                await client.aclose()
+            else:
+                client.close()
+
+    asyncio.run(scenario())
+    assert len(queue.requests) == 1
+    assert request_json(queue.requests[0]).get("snapshot_ref") == snapshot_ref
+
+
+@pytest.mark.parametrize("length", [0, 32769])
+def test_backlinks_snapshot_ref_length_rejected_before_transport(length: int) -> None:
+    queue = QueueTransport([])
+    with make_client(queue) as client, pytest.raises(ValidationError):
+        client.load_more_backlink_rows(
+            "prj_a00000000000000000000000",
+            {"target": "example.com", "target_scope": "site", "include_subdomains": True,
+             "limit": 100, "snapshot_ref": "x" * length},
+        )
+    assert queue.requests == []
 
 
 def test_gets_keyword_metrics_with_body_options_and_cached_counts() -> None:

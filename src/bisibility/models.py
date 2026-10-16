@@ -675,6 +675,10 @@ class BacklinksEstimate(BisibilityModel):
 class BacklinksSnapshot(BisibilityModel):
     """Paid or cached backlink profile with summary, history, and rows."""
 
+    snapshot_ref: str | None = Field(
+        default=None,
+        description="Opaque reference for extending this exact snapshot revision.",
+    )
     cached: bool
     cached_until: str
     cost_cents: float = Field(ge=0)
@@ -2112,10 +2116,18 @@ class AnalyzeBacklinksOptions(BisibilityModel):
 
 
 class LoadMoreBacklinkRowsOptions(BisibilityModel):
+    """Append rows using the latest successful analyze or append snapshot reference.
+
+    The field is optional for compatibility with the API schema and existing callers.
+    The server requires a current reference; missing or stale values return HTTP 409
+    ``snapshot_expired`` before paid I/O.
+    """
+
     target: str
     target_scope: BacklinksTargetScope
     include_subdomains: bool
     limit: int = Field(ge=100, le=1000, multiple_of=100)
+    snapshot_ref: str | None = Field(default=None, min_length=1, max_length=32768)
 
 
 class AnalyzeDomainOverviewOptions(BisibilityModel):

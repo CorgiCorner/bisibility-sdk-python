@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+## 0.17.1 - 2026-10-16
+
+- Send the current `snapshot_ref` when loading more backlink rows and expose replacement references on analyze and append snapshots.
+
 ## 0.17.0 - 2026-10-14
 
 - Add capability-checked project defaults previews and explicit signed review commands; previews leave settings unchanged.

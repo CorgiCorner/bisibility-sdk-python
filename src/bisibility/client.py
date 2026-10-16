@@ -249,7 +249,7 @@ _MISSING = object()
 try:
     SDK_VERSION = version("bisibility")
 except PackageNotFoundError:  # pragma: no cover - source tree without installed metadata
-    SDK_VERSION = "0.17.0"
+    SDK_VERSION = "0.17.1"
 CLIENT_ID = f"bisibility-sdk-python/{SDK_VERSION}"
 AUTH_TOKEN_PREFIXES = ("bsb_key_live_", "bsb_key_test_", "bsb_pat_live_", "mig_")
 
@@ -1719,6 +1719,10 @@ class BisibilityClient:
         """Load more rows into an unexpired backlinks snapshot.
 
         This operation always answers with a snapshot; it has no estimate mode.
+        Pass ``snapshot_ref`` from the latest successful analyze or append response.
+        Each append returns a replacement reference and only the newly fetched rows.
+        Missing or stale references raise ``BisibilityApiError`` with HTTP 409
+        ``snapshot_expired`` before the server dispatches paid I/O.
         """
         body = _dump_options(options, LoadMoreBacklinkRowsOptions)
         return self._request(
