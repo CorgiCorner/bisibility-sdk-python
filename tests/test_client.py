@@ -61,6 +61,7 @@ from bisibility import (
     ListTrafficSnapshotsOptions,
     LoadMoreBacklinkRowsOptions,
     LocationSuggestion,
+    Me,
     MintMigrationTokenInput,
     NotificationPreferencesPatch,
     PageTrafficSnapshot,
@@ -1389,8 +1390,8 @@ def test_sends_bearer_auth_and_default_headers_on_protected_requests() -> None:
     assert request.headers["Authorization"] == f"Bearer {API_KEY}"
     assert request.headers["X-Client"] == "sdk-test"
     assert request.headers["X-Request"] == "request"
-    assert request.headers["User-Agent"] == "bisibility-sdk-python/0.17.2"
-    assert request.headers["X-Bisibility-Client"] == "bisibility-sdk-python/0.17.2"
+    assert request.headers["User-Agent"] == "bisibility-sdk-python/0.17.3"
+    assert request.headers["X-Bisibility-Client"] == "bisibility-sdk-python/0.17.3"
     assert request.headers["X-Bisibility-Source"] == "sdk"
     assert request.extensions["timeout"] == {
         "connect": 30.0,
@@ -1408,7 +1409,7 @@ def test_preserves_user_agent_and_allows_disabling_timeout() -> None:
 
     request = queue.requests[-1]
     assert request.headers["User-Agent"] == "my-app/1.0"
-    assert request.headers["X-Bisibility-Client"] == "bisibility-sdk-python/0.17.2"
+    assert request.headers["X-Bisibility-Client"] == "bisibility-sdk-python/0.17.3"
     assert request.headers["X-Bisibility-Source"] == "cli"
     assert request.extensions["timeout"] == {
         "connect": None,
@@ -1654,10 +1655,16 @@ def test_profile_personal_tokens_and_project_creation() -> None:
             {
                 "domain": "example.com",
                 "id": "prj_a00000000000000000000000",
+                "missing_provider_keys": [
+                    {"capability": "rank_check", "providers": ["dataforseo", "serpapi"]},
+                    {"capability": "future_capability", "providers": []},
+                ],
                 "name": "Example",
+                "provider_keys_required": True,
                 "role": "owner",
             }
         ],
+        "provider_keys_required": True,
     }
     issued = {
         **personal_token_resource(),
@@ -1676,7 +1683,12 @@ def test_profile_personal_tokens_and_project_creation() -> None:
     )
     client = make_client(queue)
 
-    assert client.get_me().email == "owner@example.com"
+    current = client.get_me()
+    assert current.email == "owner@example.com"
+    assert current.provider_keys_required is True
+    missing = current.projects[0].missing_provider_keys
+    assert [key.capability for key in missing] == ["rank_check", "future_capability"]
+    assert missing[0].providers == ["dataforseo", "serpapi"]
     assert client.update_me({"name": "Renamed"}).name == "Renamed"
     assert client.list_my_tokens().data[0].id == "pat_a00000000000000000000000"
     assert (
@@ -5124,3 +5136,22 @@ def test_cloud_import_enforces_versioned_history_and_location_shape(
     mutation(package)
     with pytest.raises(ValidationError):
         CloudImportPackage.model_validate(package)
+
+
+def test_me_without_provider_key_fields_defaults_to_not_required() -> None:
+    me = Me.model_validate(
+        {
+            "email": "owner@example.com",
+            "id": "usr_a00000000000000000000000",
+            "projects": [
+                {
+                    "domain": "example.com",
+                    "id": "prj_a00000000000000000000000",
+                    "name": "Example",
+                    "role": "owner",
+                }
+            ],
+        }
+    )
+    assert me.provider_keys_required is False
+    assert me.projects[0].missing_provider_keys == []

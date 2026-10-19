@@ -357,11 +357,28 @@ class CreateProjectInput(BisibilityModel):
     tracking_scope: TrackingScope | None = None
 
 
+# Open set: the server may add capabilities, so unknown values are kept as plain strings.
+OwnKeyCapability: TypeAlias = (
+    Literal["ai_tracking", "backlinks", "domain_overview", "keyword_research", "rank_check"] | str
+)
+
+
+class MissingProviderKey(BisibilityModel):
+    """A paid capability the project cannot run on its own keys, and who would serve it."""
+
+    capability: OwnKeyCapability
+    providers: list[str]
+
+
 class MeProject(BisibilityModel):
     domain: str
     id: ProjectId
     name: str
     role: TeamRoleValue
+    # True when the owner account runs paid provider work only on its own keys.
+    provider_keys_required: bool = False
+    # Empty unless provider_keys_required is true; keys are connected on the web.
+    missing_provider_keys: list[MissingProviderKey] = Field(default_factory=list)
 
 
 class Me(BisibilityModel):
@@ -369,6 +386,8 @@ class Me(BisibilityModel):
     id: UserId
     name: str | None = None
     projects: list[MeProject]
+    # True when this account runs paid provider work only on its own provider keys.
+    provider_keys_required: bool = False
 
 
 class UpdateMeInput(BisibilityModel):
