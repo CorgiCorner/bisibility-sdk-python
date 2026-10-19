@@ -41,6 +41,7 @@ from .ai_tracking_suggestions import (
     AITrackingSuggestionsPreview,
     AITrackingSuggestionsPreviewInput,
 )
+from .analytics_consent import AccountAnalyticsConsent, UpdateAnalyticsConsentInput
 from .async_client import AsyncBisibilityClient, create_async_bisibility_client
 from .client import BisibilityClient, RequestOptions, create_bisibility_client
 from .defaults_review import ProjectDefaultsPreview, ProjectDefaultsReview
@@ -431,6 +432,7 @@ __all__ = [
     "AITrackingTrendOptions",
     "AITrackingTrendStratum",
     "AITrackingTrends",
+    "AccountAnalyticsConsent",
     "AddCompetitorInput",
     "AgentReportResource",
     "AgentReportSummary",
@@ -744,6 +746,7 @@ __all__ = [
     "TriggeredAlert",
     "TriggeredAlertMuteResult",
     "TriggeredAlertsReadResult",
+    "UpdateAnalyticsConsentInput",
     "UpdateKeywordInput",
     "UpdateMeInput",
     "UpdateProjectInput",

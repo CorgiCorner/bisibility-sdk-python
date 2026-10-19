@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+## 0.17.2 - 2026-10-19
+
+- Add account analytics consent reads and idempotent updates, preserving pending decisions and independent browser replay.
+
 ## 0.17.1 - 2026-10-16
 
 - Send the current `snapshot_ref` when loading more backlink rows and expose replacement references on analyze and append snapshots.

@@ -54,6 +54,7 @@ from .ai_tracking_suggestions import (
     AITrackingSuggestionsPreview,
     AITrackingSuggestionsPreviewInput,
 )
+from .analytics_consent import AccountAnalyticsConsent, UpdateAnalyticsConsentInput
 from .defaults_review import (
     ProjectDefaultsPreview,
     assert_defaults_support,
@@ -249,7 +250,7 @@ _MISSING = object()
 try:
     SDK_VERSION = version("bisibility")
 except PackageNotFoundError:  # pragma: no cover - source tree without installed metadata
-    SDK_VERSION = "0.17.1"
+    SDK_VERSION = "0.17.2"
 CLIENT_ID = f"bisibility-sdk-python/{SDK_VERSION}"
 AUTH_TOKEN_PREFIXES = ("bsb_key_live_", "bsb_key_test_", "bsb_pat_live_", "mig_")
 
@@ -1229,6 +1230,27 @@ class BisibilityClient:
             "/projects",
             response_model=ListResponse[Project],
             request_options=request_options,
+        )
+
+    def get_analytics_consent(
+        self, request_options: RequestOptionsLike = None
+    ) -> AccountAnalyticsConsent:
+        """Read account analytics permission; replay is browser-local."""
+        return self._request(
+            "GET", "/me/analytics-consent",
+            response_model=AccountAnalyticsConsent, request_options=request_options,
+        )
+
+    def update_analytics_consent(
+        self,
+        input: UpdateAnalyticsConsentInput | Mapping[str, Any],
+        request_options: RequestOptionsLike = None,
+    ) -> AccountAnalyticsConsent:
+        """Store an explicit idempotent account analytics decision."""
+        return self._request(
+            "PUT", "/me/analytics-consent",
+            body=_dump_body(input, UpdateAnalyticsConsentInput),
+            response_model=AccountAnalyticsConsent, request_options=request_options,
         )
 
     def get_me(self, request_options: RequestOptionsLike = None) -> Me:

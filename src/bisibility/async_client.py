@@ -195,6 +195,8 @@ class AsyncBisibilityClient(BisibilityClient):
     get_cost_estimate = _asyncify(BisibilityClient.get_cost_estimate)  # type: ignore[assignment]
     search_locations = _asyncify(BisibilityClient.search_locations)  # type: ignore[assignment]
     list_projects = _asyncify(BisibilityClient.list_projects)  # type: ignore[assignment]
+    get_analytics_consent = _asyncify(BisibilityClient.get_analytics_consent)  # type: ignore[assignment]
+    update_analytics_consent = _asyncify(BisibilityClient.update_analytics_consent)  # type: ignore[assignment]
     get_me = _asyncify(BisibilityClient.get_me)  # type: ignore[assignment]
     update_me = _asyncify(BisibilityClient.update_me)  # type: ignore[assignment]
     list_my_tokens = _asyncify(BisibilityClient.list_my_tokens)  # type: ignore[assignment]

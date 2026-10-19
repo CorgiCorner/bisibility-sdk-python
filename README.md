@@ -8,7 +8,7 @@
 > [API reference](https://bisibility.com/docs/api/overview) ·
 > [Roadmap](https://bisibility.com/roadmap)
 >
-> SDK version: **0.17.1**. Published versions are listed on [PyPI](https://pypi.org/project/bisibility/).
+> SDK version: **0.17.2**. Published versions are listed on [PyPI](https://pypi.org/project/bisibility/).
 
 Python SDK for the Bisibility REST API.
 
@@ -608,6 +608,20 @@ analytics = bisibility.connect_provider(
 # resolved property or site.
 print(bisibility.test_provider_connection(project_id, "plausible").message)
 ```
+
+## Account analytics consent
+
+Account analytics permission is separate from browser replay. A null decision timestamp
+means pending. These authenticated account operations require a personal token; the server
+also enforces supported first-party authorization. An update sends only the explicit
+analytics boolean and preserves a refusal (`false`) in the request.
+
+```python
+consent = bisibility.get_analytics_consent()
+bisibility.update_analytics_consent({"analytics": False})
+```
+
+Both methods are also available on `AsyncBisibilityClient` using `await`.
 
 ## Errors
 
