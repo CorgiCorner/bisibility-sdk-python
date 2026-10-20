@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+## 0.18.0 - 2026-10-20
+
+- Align the version with the 0.18 release of the Bisibility SDKs, CLI and MCP server. No API changes.
+
 ## 0.17.3 - 2026-10-19
 
 - Add own-provider-key state to `Me` and `MeProject` (`provider_keys_required`, `missing_provider_keys`) so apps can show which paid capabilities need a connected key.
