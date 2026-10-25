@@ -208,6 +208,9 @@ bisibility.create_api_key(
 - Rank-history export: `export_rank_history` for typed cursor-paginated JSON or raw CSV text
 - Sitemap monitors: `list_sitemap_monitors`, `update_sitemap_monitor`. A project has at
   most one monitor, so a monitor's `id` is its project's id.
+- Page indexing: `list_search_index_sitemaps`, `get_search_index_sitemap`,
+  `inspect_search_index_urls`, `get_page_indexing_report`, `list_page_indexing_urls`,
+  `get_page_indexing_settings`, `update_page_indexing_settings`
 - Team: `list_team_members`, `list_team_invites`, `create_team_invite`,
   `revoke_project_team_invite`, `revoke_team_invite`
 - Providers: `list_providers`, `connect_provider`, `test_provider_connection`,
@@ -229,7 +232,7 @@ bisibility.create_api_key(
 
 ### Research workspace
 
-The client provides typed project context, agent report, AI visibility, prompt
+The client provides typed project context, agent report, Brand Visibility, prompt
 comparison, and site audit methods. Agent reports use strict `agr_` IDs, and
 `iter_agent_reports` preserves report-kind filters while following v3 cursors.
 AI analysis methods require `max_cost_cents` and distinguish estimates from saved
@@ -584,6 +587,7 @@ provider = bisibility.connect_provider(
     ),
 )
 
+# New SERP connections start disabled unless no other SERP connection is enabled.
 # `connect_provider` sends `priority` with the connect request. `0` promotes the provider
 # and renumbers the fallback chain; any other value reorders it. Omit it to keep a
 # reconnected provider's place and append a new one. Legacy `primary=True` maps to zero;
@@ -657,11 +661,12 @@ client.update_provider_budgets(project_id, "dataforseo", {"own": {"app": None}, 
 
 The same methods are available with `await` on `AsyncBisibilityClient`.
 
-## AI tracking
+## Prompt Tracker
 
-AI tracking methods manage project topics, immutable prompt revisions, disabled-by-default
-schedules, runs, samples, history, comparable trends, evidence exports, and editable prompt
-suggestions. Tracking resource IDs use `ait_`, `aip_`, `apr_`, `ais_`, `air_`, and `asm_`.
+Prompt Tracker methods manage project topics, immutable prompt revisions, disabled-by-default
+schedules, runs, samples, history, comparable trends, and evidence exports. Editable prompt
+suggestions are Prompt Research. Tracking resource IDs use `ait_`, `aip_`, `apr_`,
+`ais_`, `air_`, and `asm_`.
 Preview before launching paid work, pass the preview credential/budget/consent revisions, and
 provide explicit consent plus an `Idempotency-Key` for launch or retry. Preview never submits a
 provider task. Preserve the returned decimal USD strings, null amounts, unknown measurement
@@ -674,8 +679,8 @@ supports hard caps and explicitly consented provider actual-cost mode. Actual-co
 requires the estimate credential reference and a stable UUID. An advisory limit is not a
 guaranteed maximum charge.
 
-Model prompt generation uses `ai_tracking_suggestions_preview` followed by
-`ai_tracking_suggestions_generate`. Review all five context fields, selected competitors, model
+Model prompt generation uses `prompt_research_suggestions_preview` followed by
+`prompt_research_suggestions_generate`. Review all five context fields, selected competitors, model
 and market. The complete reviewed snapshot must fit within 5000 serialized Unicode characters.
 Generation requires the unexpired frozen preview, explicit paid consent and a stable UUID
 `idempotency_key` request option. Forecasts are not guaranteed maximum costs. Accepted edits
@@ -748,3 +753,102 @@ server export text. All five methods honor the existing authentication, timeout,
 cancellation, error and request-options behavior.
 
 Project defaults previews require the server capability `reviewed_project_defaults: v1`. Call `preview_project_defaults` with a draft, show its signed preview and impact, then explicitly submit the same draft with `ProjectDefaultsReview`. Preserve the returned revision as a string and reuse one command key for retries. Async clients expose the same two-step flow. Preview never changes project settings.
+
+Notification check summaries use `check_notification_setting` (`all`, `important`, or `none`),
+`check_notification_top_n` and `check_notification_position_move` (integers from 1 to 100),
+and `provider_incident_in_app`. `update_notification_preferences` returns
+`NotificationPreferencesUpdated` with optional typed `warnings`. The deprecated `check_in_app`
+remains readable for compatibility; the server ignores writes and returns a warning.
+
+Rank checks expose optional `comparison_allowed`, `result_completeness`, `returned_depth`, and
+`evidence_projection`. Run reads expose `evidence_projections` with check IDs; legacy exports and
+observation or logical-check report records expose `evidence_projection`. Nullable evidence and
+recovery values preserve unknowns, and missing additive fields remain compatible with older
+servers. `result_completeness` and response notification settings accept future string values.
+## Page indexing
+
+These operations use the project's connected Search Console property and return
+Google's indexed state as already known to Google, not a live test. Results may be
+partial or delayed. All operations are free of Credits charges.
+
+```python
+from bisibility import BisibilityClient, RequestOptions
+
+with BisibilityClient(api_key="bsb_pat_live_example") as client:
+    project_id = "prj_a00000000000000000000000"
+    sitemaps = client.list_search_index_sitemaps(project_id)
+    if sitemaps.sitemaps:
+        detail = client.get_search_index_sitemap(project_id, sitemaps.sitemaps[0].path)
+    inspected = client.inspect_search_index_urls(
+        project_id,
+        {"urls": ["https://example.com/", "https://example.com/pricing"]},
+        request_options=RequestOptions(idempotency_key="page-indexing-example-001"),
+    )
+    for result in inspected.results:
+        print(result.url, result.inspection, result.error)
+
+    report = client.get_page_indexing_report(project_id)
+    print(report.complete, report.remaining, report.discovery_complete)
+    urls = client.list_page_indexing_urls(
+        project_id, {"group": "not_indexed", "history": "true", "limit": 50}
+    )
+    if urls.meta.next_cursor is not None:
+        next_page = client.list_page_indexing_urls(
+            project_id,
+            {
+                "group": "not_indexed",
+                "history": "true",
+                "limit": 50,
+                "cursor": urls.meta.next_cursor,
+            },
+        )
+    settings = client.get_page_indexing_settings(project_id)
+    saved = client.update_page_indexing_settings(
+        project_id,
+        {"budget_mode": "fixed", "inspection_daily_limit": 100},
+        request_options=RequestOptions(idempotency_key="page-indexing-settings-001"),
+    )
+```
+
+`get_search_index_sitemap` requires an absolute HTTP or HTTPS URL of 1-2048 characters; otherwise, it raises `BisibilityConfigurationError`.
+
+Inspection requires write scope and accepts 1-10 URLs within the connected property.
+The server normalizes URLs and deduplicates them before calling Google. Every URL
+sent to Google counts against a shared project daily inspection allowance, even
+when the call fails. The allowance is an estimate because other tools consume
+quota too; manual and background inspections share it and it resets at Pacific
+midnight. URLs admitted but not sent are released. Check per-URL errors even on
+HTTP 200: `provider_rate_limited` includes `reset_at` and `scope` (`daily`, `minute`,
+`unknown`) and stops further calls in that batch. Reuse an idempotency key to replay
+the response without another inspection. The same methods are available on
+`AsyncBisibilityClient` with `await`.
+
+Report, URL list and settings reads use stored data without calling Google. Report
+totals cover current sitemap URLs and keyword targets; `complete=False` means the
+report is not a full-site census. `discovery_complete` and `discovered_at` describe
+the candidate inventory. `oldest_result_at` and `newest_result_at` describe result
+freshness; each reason also has a required, nullable `oldest_result_at` for its
+oldest stored result. `estimated_days_remaining` estimates the unchecked remainder
+in fixed mode and is null without a fixed daily allowance.
+
+URL filters are `group`, `coverage_state`, `sitemap`, `source`, `search`,
+`changed_since`, `cursor`, `limit` (1-100, default 50) and `history` (`"true"` or
+`"false"`, default `"false"`).
+Pass `meta.next_cursor` unchanged and retain the filters on the next page.
+For example, `{"changed_since": "2026-10-24T12:00:00Z"}` includes URLs with a stored
+tracked change at or after that time, before pagination. The filter accepts a
+timezone-aware `datetime` or ISO 8601 string with an offset and sends RFC 3339 UTC;
+invalid values and timestamps without an offset are rejected.
+Manual-only URLs require `source="manual"` and do not affect report totals.
+`coverage_state="Unspecified"` matches missing Google states in `indexed` and
+`not_indexed`; filter `inspection_failed` and `not_checked` by group alone.
+`checked_at` is the last Google result time; `inspection_failed_at` records the last
+failed attempt. Optional `history` contains up to 100 recent `changes` with
+`previous` and `next` states and a `complete` flag.
+
+Settings updates require write scope and at least one setting. `off` disables
+background inspections; explicit inspections still use the fixed allowance.
+`fixed` sets a daily limit of 0-2000 URLs. `available_quota` is self-host only;
+use `available_modes` to read supported modes. Settings expose estimated usage,
+`last429_kind`, `last429_at` and `next_reset_at` at Pacific midnight. Shared property
+usage is also estimated because other tools consume Google quota.

@@ -104,15 +104,19 @@ def test_tracking_transport_preserves_identity_and_unknown_evidence(async_mode: 
             return await value if inspect.isawaitable(value) else value
 
         try:
-            await call(client.preview_ai_tracking_run(PROJECT, PREVIEW))
-            await call(client.create_ai_tracking_run(PROJECT, PLAN, {"idempotency_key": "stable"}))
-            result = await call(client.list_ai_tracking_samples(PROJECT, RUN, {"cursor": CURSOR}))
+            await call(client.preview_prompt_tracker_run(PROJECT, PREVIEW))
+            await call(
+                client.create_prompt_tracker_run(PROJECT, PLAN, {"idempotency_key": "stable"})
+            )
+            result = await call(
+                client.list_prompt_tracker_samples(PROJECT, RUN, {"cursor": CURSOR})
+            )
             assert result.data[0].model_dump() == sample
             assert result.meta.next_cursor == CURSOR
             with pytest.raises(BisibilityConfigurationError):
-                await call(client.get_ai_tracking_run(PROJECT, PROMPT))
+                await call(client.get_prompt_tracker_run(PROJECT, PROMPT))
             with pytest.raises(BisibilityConfigurationError, match="Idempotency-Key"):
-                await call(client.create_ai_tracking_run(PROJECT, PLAN))
+                await call(client.create_prompt_tracker_run(PROJECT, PLAN))
         finally:
             await call(client.close())
 

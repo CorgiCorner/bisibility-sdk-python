@@ -17,17 +17,17 @@ DraftId = Annotated[
 ]
 
 
-class AITrackingGenerationReference(BisibilityModel):
+class PromptResearchGenerationReference(BisibilityModel):
     generation_id: GenerationId
     draft_id: DraftId
 
 
-class AITrackingProviderDatasetReference(BisibilityModel):
+class PromptResearchProviderDatasetReference(BisibilityModel):
     report_id: Annotated[str, Field(pattern=r"^agr_[a-z][a-z0-9]{23}$")]
     row_index: int = Field(ge=0)
 
 
-class AITrackingSuggestionConfiguration(BisibilityModel):
+class PromptResearchSuggestionConfiguration(BisibilityModel):
     model_config = ConfigDict(extra="forbid")
     provider: Literal["dataforseo"]
     engine: Literal["chat_gpt"]
@@ -38,7 +38,7 @@ class AITrackingSuggestionConfiguration(BisibilityModel):
     advisory_cost_limit_cents: float = Field(gt=0, le=1000000, allow_inf_nan=False)
 
 
-class AITrackingReviewedContext(BisibilityModel):
+class PromptResearchReviewedContext(BisibilityModel):
     model_config = ConfigDict(extra="forbid")
     business: str
     audience: str
@@ -47,25 +47,25 @@ class AITrackingReviewedContext(BisibilityModel):
     agent_rules: str
 
 
-class AITrackingReviewedCompetitor(BisibilityModel):
+class PromptResearchReviewedCompetitor(BisibilityModel):
     model_config = ConfigDict(extra="forbid")
     id: Annotated[str, Field(pattern=r"^cmp_[a-z][a-z0-9]{23}$")]
     label: str | None
     domain: str = Field(min_length=1, max_length=253)
 
 
-class AITrackingSuggestionReviewSnapshot(BisibilityModel):
-    context: AITrackingReviewedContext
-    competitors: list[AITrackingReviewedCompetitor]
+class PromptResearchSuggestionReviewSnapshot(BisibilityModel):
+    context: PromptResearchReviewedContext
+    competitors: list[PromptResearchReviewedCompetitor]
 
 
-class AITrackingSuggestionSnapshot(BisibilityModel):
+class PromptResearchSuggestionSnapshot(BisibilityModel):
     model_config = ConfigDict(extra="forbid")
-    context: AITrackingReviewedContext
-    competitors: list[AITrackingReviewedCompetitor] = Field(max_length=20)
+    context: PromptResearchReviewedContext
+    competitors: list[PromptResearchReviewedCompetitor] = Field(max_length=20)
 
     @model_validator(mode="after")
-    def validate_reviewed_snapshot(self) -> AITrackingSuggestionSnapshot:
+    def validate_reviewed_snapshot(self) -> PromptResearchSuggestionSnapshot:
         snapshot = self.model_dump(mode="json")
         snapshot["context"]["agentRules"] = snapshot["context"].pop("agent_rules")
         length = len(json.dumps(snapshot, ensure_ascii=False, separators=(",", ":")))
@@ -76,14 +76,14 @@ class AITrackingSuggestionSnapshot(BisibilityModel):
         return self
 
 
-class AITrackingSuggestionsPreviewInput(BisibilityModel):
+class PromptResearchSuggestionsPreviewInput(BisibilityModel):
     model_config = ConfigDict(extra="forbid")
-    configuration: AITrackingSuggestionConfiguration
-    input_snapshot: AITrackingSuggestionSnapshot
+    configuration: PromptResearchSuggestionConfiguration
+    input_snapshot: PromptResearchSuggestionSnapshot
     credential_connection_id: ConnectionId | None = None
 
 
-class AITrackingSuggestionsPreview(AITrackingSuggestionsPreviewInput):
+class PromptResearchSuggestionsPreview(PromptResearchSuggestionsPreviewInput):
     version: Literal[1]
     snapshot_hash: str = Field(pattern=r"^[a-f0-9]{64}$")
     estimated_cost_cents: float = Field(gt=0, allow_inf_nan=False)
@@ -97,13 +97,13 @@ class AITrackingSuggestionsPreview(AITrackingSuggestionsPreviewInput):
     limitations: list[str] = Field(max_length=20)
 
 
-class AITrackingSuggestionsGenerateInput(BisibilityModel):
+class PromptResearchSuggestionsGenerateInput(BisibilityModel):
     model_config = ConfigDict(extra="forbid")
-    preview: AITrackingSuggestionsPreview
+    preview: PromptResearchSuggestionsPreview
     consent: Literal[True]
 
 
-class AITrackingModelSuggestion(BisibilityModel):
+class PromptResearchModelSuggestion(BisibilityModel):
     draft_id: DraftId
     text: str
     category: Literal["neutral", "comparative", "branded"]
@@ -113,21 +113,21 @@ class AITrackingModelSuggestion(BisibilityModel):
     accepted: Literal[False]
 
 
-class AITrackingSuggestionsGeneration(BisibilityModel):
+class PromptResearchSuggestionsGeneration(BisibilityModel):
     generation_id: GenerationId
-    drafts: list[AITrackingModelSuggestion]
+    drafts: list[PromptResearchModelSuggestion]
     cost_usd: str | None
     cost_state: Literal["unknown", "confirmed"]
     method: Literal["model_generated_hypothesis"]
     limitations: list[str]
 
 
-class AITrackingAcceptedDraft(BisibilityModel):
+class PromptResearchAcceptedDraft(BisibilityModel):
     model_config = ConfigDict(extra="forbid")
     text: str = Field(min_length=3, max_length=4000)
     category: Literal["neutral", "comparative", "branded"]
-    generation_reference: AITrackingGenerationReference | None = None
-    provider_dataset_reference: AITrackingProviderDatasetReference | None = None
+    generation_reference: PromptResearchGenerationReference | None = None
+    provider_dataset_reference: PromptResearchProviderDatasetReference | None = None
     provenance: (
         Literal["generated_hypothesis", "provider_dataset", "model_generated_hypothesis"] | None
     ) = None
@@ -136,7 +136,7 @@ class AITrackingAcceptedDraft(BisibilityModel):
     accepted: Literal[False] | None = None
 
     @model_validator(mode="after")
-    def require_trusted_provenance(self) -> AITrackingAcceptedDraft:
+    def require_trusted_provenance(self) -> PromptResearchAcceptedDraft:
         if self.generation_reference and self.provider_dataset_reference:
             raise ValueError("Choose one trusted provenance reference.")
         if self.provenance == "model_generated_hypothesis" and not self.generation_reference:

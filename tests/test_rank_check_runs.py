@@ -50,7 +50,7 @@ def test_run_reads_roundtrip_and_only_get(asynchronous: bool, listed: bool) -> N
                 if listed
                 else client.get_rank_check_run(PROJECT, RUN)
             )
-    assert result.model_dump(mode="json") == expected
+    assert result.model_dump(mode="json", exclude_unset=True) == expected
     assert len(calls) == 1
     request = calls[0]
     assert request.method == "GET"
@@ -148,7 +148,9 @@ def test_no_check_required_and_future_metadata_preserved(
         api_key="bsb_pat_live_example",
         transport=httpx.MockTransport(lambda request: httpx.Response(200, json=raw)),
     ) as client:
-        assert client.get_rank_check_run(PROJECT, RUN).model_dump(mode="json") == raw
+        assert client.get_rank_check_run(PROJECT, RUN).model_dump(
+            mode="json", exclude_unset=True
+        ) == raw
 
 
 @pytest.mark.parametrize("asynchronous", [False, True])

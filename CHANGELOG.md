@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+## 0.19.0 - 2026-10-25
+
+- **Breaking:** Rename AI Tracking to Prompt Tracker and AI Visibility to Brand Visibility. Move prompt suggestion methods to Prompt Research.
+
+- Add Page indexing reports, filtered URL history, sitemap reads, explicit URL inspection, and background inspection settings.
+
+- Add check-summary and provider-incident preferences. Deprecate `check_in_app` writes while preserving compatibility.
+
+- Expose retained provider evidence on rank checks, runs, and history exports. New SERP connections follow existing enabled providers.
+
+- Add Prompt Explorer engine mode for ChatGPT, Claude, Gemini, and Perplexity, with typed engine results and cost-cap validation.
+
 ## 0.18.0 - 2026-10-20
 
 - Align the version with the 0.18 release of the Bisibility SDKs, CLI and MCP server. No API changes.

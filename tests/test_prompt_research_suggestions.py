@@ -10,9 +10,13 @@ import pytest
 from pydantic import ValidationError
 
 from bisibility import AsyncBisibilityClient, BisibilityClient
-from bisibility.ai_tracking import AITrackingAcceptanceInput, AITrackingEvidence, AITrackingExport
-from bisibility.ai_tracking_suggestions import AITrackingSuggestionsPreviewInput
 from bisibility.errors import BisibilityConfigurationError
+from bisibility.prompt_research_suggestions import PromptResearchSuggestionsPreviewInput
+from bisibility.prompt_tracker import (
+    PromptResearchAcceptanceInput,
+    PromptTrackerEvidence,
+    PromptTrackerExport,
+)
 
 PROJECT = "prj_a00000000000000000000000"
 KEY = "11111111-1111-4111-8111-111111111111"
@@ -60,12 +64,12 @@ PREVIEW = {
 
 def test_export_scope_is_optional_and_preserves_download_completeness() -> None:
     body = {"items": [], "run_id": "air_a00000000000000000000000", "next_cursor": "resume"}
-    assert AITrackingExport.model_validate(body).scope is None
+    assert PromptTrackerExport.model_validate(body).scope is None
     scope = {"complete": False, "max_pages": 20, "loaded": 1000, "resumed": True}
-    result = AITrackingExport.model_validate({**body, "scope": scope})
+    result = PromptTrackerExport.model_validate({**body, "scope": scope})
     assert result.scope is not None
     assert result.scope.model_dump() == scope
-    evidence = AITrackingEvidence.model_validate(
+    evidence = PromptTrackerEvidence.model_validate(
         {
             "answer_text": None,
             "raw": None,
@@ -115,9 +119,9 @@ def test_generation_transport_freezes_review_and_preserves_unknown_cost(async_mo
             return await value if inspect.isawaitable(value) else value
 
         try:
-            preview = await call(client.ai_tracking_suggestions_preview(PROJECT, INPUT))
+            preview = await call(client.prompt_research_suggestions_preview(PROJECT, INPUT))
             response = await call(
-                client.ai_tracking_suggestions_generate(
+                client.prompt_research_suggestions_generate(
                     PROJECT,
                     {"preview": preview.data.model_dump(), "consent": True},
                     {"idempotency_key": KEY},
@@ -127,7 +131,7 @@ def test_generation_transport_freezes_review_and_preserves_unknown_cost(async_mo
             assert response.data.method == "model_generated_hypothesis"
             with pytest.raises(BisibilityConfigurationError, match="UUID"):
                 await call(
-                    client.ai_tracking_suggestions_generate(
+                    client.prompt_research_suggestions_generate(
                         PROJECT, {"preview": PREVIEW, "consent": True}
                     )
                 )
@@ -151,18 +155,20 @@ def test_snapshot_bounds_and_trusted_acceptance_are_explicit() -> None:
         },
     }
     with pytest.raises(ValidationError, match="5000"):
-        AITrackingSuggestionsPreviewInput.model_validate(oversized)
+        PromptResearchSuggestionsPreviewInput.model_validate(oversized)
     draft = {
         "text": "Edited hypothesis?",
         "category": "neutral",
         "generation_reference": {"generation_id": "asg_a00000000000000000000000", "draft_id": KEY},
     }
     assert (
-        AITrackingAcceptanceInput.model_validate({"drafts": [draft]}).drafts[0].generation_reference
+        PromptResearchAcceptanceInput.model_validate({"drafts": [draft]})
+        .drafts[0]
+        .generation_reference
         is not None
     )
     with pytest.raises(ValidationError, match="generation reference"):
-        AITrackingAcceptanceInput.model_validate(
+        PromptResearchAcceptanceInput.model_validate(
             {
                 "drafts": [
                     {

@@ -5,6 +5,7 @@ from typing import Literal
 from pydantic import Field
 
 from .model_base import BisibilityModel
+from .provider_evidence import ProviderEvidenceProjection
 from .public_ids import CheckId, KeywordId
 from .rank_history_report_items import RankHistoryReportNormalizedItem
 
@@ -23,6 +24,7 @@ class RankHistoryReportObservationConfiguredScope(BisibilityModel):
 
 
 class RankHistoryReportObservation(BisibilityModel):
+    evidence_projection: ProviderEvidenceProjection | None = None
     checked_at: str
     check_recorded_at: str
     observed_at: str | None
@@ -53,6 +55,7 @@ class RankHistoryReportObservation(BisibilityModel):
 
 
 class RankHistoryReportAttempt(BisibilityModel):
+    evidence_projection: ProviderEvidenceProjection | None = None
     checked_at: str
     check_recorded_at: str
     observed_at: str | None

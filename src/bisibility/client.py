@@ -25,35 +25,6 @@ import httpx
 from pydantic import BaseModel, TypeAdapter, ValidationError
 
 from .ai_catalog import AIResearchCatalog
-from .ai_tracking import (
-    AITrackingAcceptance,
-    AITrackingAcceptanceInput,
-    AITrackingEvidenceOptions,
-    AITrackingExport,
-    AITrackingPreview,
-    AITrackingPreviewInput,
-    AITrackingPrompt,
-    AITrackingPromptInput,
-    AITrackingPromptPatch,
-    AITrackingRun,
-    AITrackingRunInput,
-    AITrackingSample,
-    AITrackingSchedule,
-    AITrackingScheduleInput,
-    AITrackingSchedulePatch,
-    AITrackingSuggestions,
-    AITrackingTopic,
-    AITrackingTopicInput,
-    AITrackingTopicPatch,
-    AITrackingTrendOptions,
-    AITrackingTrends,
-)
-from .ai_tracking_suggestions import (
-    AITrackingSuggestionsGenerateInput,
-    AITrackingSuggestionsGeneration,
-    AITrackingSuggestionsPreview,
-    AITrackingSuggestionsPreviewInput,
-)
 from .analytics_consent import AccountAnalyticsConsent, UpdateAnalyticsConsentInput
 from .defaults_review import (
     ProjectDefaultsPreview,
@@ -86,8 +57,8 @@ from .models import (
     AlertRule,
     AlertRuleDeleteResult,
     AlertRuleInput,
-    AnalyzeAIVisibilityOptions,
     AnalyzeBacklinksOptions,
+    AnalyzeBrandVisibilityOptions,
     AnalyzeDomainOverviewOptions,
     ApiKey,
     ApiKeyCreateInput,
@@ -160,6 +131,7 @@ from .models import (
     MintMigrationTokenInput,
     NotificationPreferences,
     NotificationPreferencesPatch,
+    NotificationPreferencesUpdated,
     OpenApiDocument,
     PageTrafficSnapshotsResponse,
     PaginationOptions,
@@ -226,12 +198,54 @@ from .models import (
     WebhookCreateInput,
     WebhookUpdateInput,
 )
+from .page_indexing import (
+    ListPageIndexingUrlsOptions,
+    PageIndexingReport,
+    PageIndexingSettings,
+    PageIndexingSettingsPatch,
+    PageIndexingUrls,
+)
+from .prompt_research_suggestions import (
+    PromptResearchSuggestionsGenerateInput,
+    PromptResearchSuggestionsGeneration,
+    PromptResearchSuggestionsPreview,
+    PromptResearchSuggestionsPreviewInput,
+)
+from .prompt_tracker import (
+    PromptResearchAcceptance,
+    PromptResearchAcceptanceInput,
+    PromptResearchSuggestions,
+    PromptTrackerEvidenceOptions,
+    PromptTrackerExport,
+    PromptTrackerPreview,
+    PromptTrackerPreviewInput,
+    PromptTrackerPrompt,
+    PromptTrackerPromptInput,
+    PromptTrackerPromptPatch,
+    PromptTrackerRun,
+    PromptTrackerRunInput,
+    PromptTrackerSample,
+    PromptTrackerSchedule,
+    PromptTrackerScheduleInput,
+    PromptTrackerSchedulePatch,
+    PromptTrackerTopic,
+    PromptTrackerTopicInput,
+    PromptTrackerTopicPatch,
+    PromptTrackerTrendOptions,
+    PromptTrackerTrends,
+)
 from .public_ids import PublicIdPrefix, require_public_id
 from .rank_check_runs import (
     ListRankCheckRunsOptions,
     RankCheckRunRead,
     _run_list_response_adapter,
     _run_response_adapter,
+)
+from .search_index import (
+    SearchIndexInspectionInput,
+    SearchIndexInspections,
+    SearchIndexSitemapResponse,
+    SearchIndexSitemaps,
 )
 from .tracking_ids import require_tracking_id
 
@@ -250,7 +264,7 @@ _MISSING = object()
 try:
     SDK_VERSION = version("bisibility")
 except PackageNotFoundError:  # pragma: no cover - source tree without installed metadata
-    SDK_VERSION = "0.18.0"
+    SDK_VERSION = "0.19.0"
 CLIENT_ID = f"bisibility-sdk-python/{SDK_VERSION}"
 AUTH_TOKEN_PREFIXES = ("bsb_key_live_", "bsb_key_test_", "bsb_pat_live_", "mig_")
 
@@ -300,6 +314,19 @@ def _encoded_path_segment(value: str, prefix: PublicIdPrefix) -> str:
 
 def _encoded_natural_path_segment(value: str) -> str:
     return quote(value, safe="")
+
+
+def _require_sitemap_url(value: object) -> str:
+    message = "Expected an absolute HTTP or HTTPS sitemap URL of 1-2048 characters."
+    if not isinstance(value, str) or not 1 <= len(value) <= 2048 or value in {".", ".."}:
+        raise BisibilityConfigurationError(message)
+    try:
+        parsed = urlsplit(value)
+        if parsed.scheme.lower() in {"http", "https"} and parsed.hostname:
+            return value
+    except ValueError:
+        pass
+    raise BisibilityConfigurationError(message)
 
 
 def _query_value(value: QueryValue) -> str | list[str] | None:
@@ -648,16 +675,16 @@ class BisibilityClient:
             request_options=request_options,
         )
 
-    def analyze_ai_visibility(
+    def analyze_brand_visibility(
         self,
         project_id: str,
-        input: AnalyzeAIVisibilityOptions | Mapping[str, Any],
+        input: AnalyzeBrandVisibilityOptions | Mapping[str, Any],
         request_options: RequestOptionsLike = None,
     ) -> DataResponse[AIAnalysisOutcome]:
         return self._request(
             "POST",
-            f"/projects/{_encoded_path_segment(project_id, 'prj')}/ai-visibility",
-            body=_dump_body(input, AnalyzeAIVisibilityOptions),
+            f"/projects/{_encoded_path_segment(project_id, 'prj')}/brand-visibility",
+            body=_dump_body(input, AnalyzeBrandVisibilityOptions),
             response_model=DataResponse[AIAnalysisOutcome],
             request_options=request_options,
         )
@@ -676,30 +703,31 @@ class BisibilityClient:
             request_options=request_options,
         )
 
-    def ai_tracking_suggestions_preview(
+    def prompt_research_suggestions_preview(
         self,
         project_id: str,
-        input: AITrackingSuggestionsPreviewInput | Mapping[str, Any],
+        input: PromptResearchSuggestionsPreviewInput | Mapping[str, Any],
         request_options: RequestOptionsLike = None,
-    ) -> DataResponse[AITrackingSuggestionsPreview]:
-        parsed = AITrackingSuggestionsPreviewInput.model_validate(input)
+    ) -> DataResponse[PromptResearchSuggestionsPreview]:
+        parsed = PromptResearchSuggestionsPreviewInput.model_validate(input)
         body = parsed.model_dump(mode="json", exclude_unset=True)
         if body.get("credential_connection_id") is None:
             body.pop("credential_connection_id", None)
         return self._request(
             "POST",
-            f"/projects/{_encoded_path_segment(project_id, 'prj')}/ai-tracking/suggestions/preview",
+            f"/projects/{_encoded_path_segment(project_id, 'prj')}"
+            "/prompt-research/suggestions/preview",
             body=body,
-            response_model=DataResponse[AITrackingSuggestionsPreview],
+            response_model=DataResponse[PromptResearchSuggestionsPreview],
             request_options=request_options,
         )
 
-    def ai_tracking_suggestions_generate(
+    def prompt_research_suggestions_generate(
         self,
         project_id: str,
-        input: AITrackingSuggestionsGenerateInput | Mapping[str, Any],
+        input: PromptResearchSuggestionsGenerateInput | Mapping[str, Any],
         request_options: RequestOptionsLike = None,
-    ) -> DataResponse[AITrackingSuggestionsGeneration]:
+    ) -> DataResponse[PromptResearchSuggestionsGeneration]:
         key = _coerce_request_options(request_options).idempotency_key
         try:
             if not key:
@@ -713,385 +741,386 @@ class BisibilityClient:
             raise BisibilityConfigurationError(
                 "A stable UUID Idempotency-Key is required."
             ) from exc
-        parsed = AITrackingSuggestionsGenerateInput.model_validate(input)
+        parsed = PromptResearchSuggestionsGenerateInput.model_validate(input)
         return self._request(
             "POST",
             (
                 f"/projects/{_encoded_path_segment(project_id, 'prj')}"
-                "/ai-tracking/suggestions/generate"
+                "/prompt-research/suggestions/generate"
             ),
             body=parsed.model_dump(mode="json", exclude_unset=True),
-            response_model=DataResponse[AITrackingSuggestionsGeneration],
+            response_model=DataResponse[PromptResearchSuggestionsGeneration],
             request_options=request_options,
         )
 
-    def list_ai_tracking_topics(
+    def list_prompt_tracker_topics(
         self,
         project_id: str,
         input: Mapping[str, Any] | None = None,
         request_options: RequestOptionsLike = None,
-    ) -> ListResponse[AITrackingTopic]:
+    ) -> ListResponse[PromptTrackerTopic]:
         return self._request(
             "GET",
-            f"/projects/{_encoded_path_segment(project_id, 'prj')}/ai-tracking/topics",
+            f"/projects/{_encoded_path_segment(project_id, 'prj')}/prompt-tracker/topics",
             query=dict(input or {}),
-            response_model=ListResponse[AITrackingTopic],
+            response_model=ListResponse[PromptTrackerTopic],
             request_options=request_options,
         )
 
-    def create_ai_tracking_topic(
+    def create_prompt_tracker_topic(
         self,
         project_id: str,
-        input: AITrackingTopicInput | Mapping[str, Any],
+        input: PromptTrackerTopicInput | Mapping[str, Any],
         request_options: RequestOptionsLike = None,
-    ) -> DataResponse[AITrackingTopic]:
+    ) -> DataResponse[PromptTrackerTopic]:
         return self._request(
             "POST",
-            f"/projects/{_encoded_path_segment(project_id, 'prj')}/ai-tracking/topics",
-            body=_dump_body(input, AITrackingTopicInput),
-            response_model=DataResponse[AITrackingTopic],
+            f"/projects/{_encoded_path_segment(project_id, 'prj')}/prompt-tracker/topics",
+            body=_dump_body(input, PromptTrackerTopicInput),
+            response_model=DataResponse[PromptTrackerTopic],
             request_options=request_options,
         )
 
-    def update_ai_tracking_topic(
+    def update_prompt_tracker_topic(
         self,
         project_id: str,
         id: str,
-        input: AITrackingTopicPatch | Mapping[str, Any],
+        input: PromptTrackerTopicPatch | Mapping[str, Any],
         request_options: RequestOptionsLike = None,
-    ) -> DataResponse[AITrackingTopic]:
+    ) -> DataResponse[PromptTrackerTopic]:
         return self._request(
             "PATCH",
             (
-                f"/projects/{_encoded_path_segment(project_id, 'prj')}/ai-tracking/topics/"
+                f"/projects/{_encoded_path_segment(project_id, 'prj')}/prompt-tracker/topics/"
                 f"{require_tracking_id(id, 'ait')}"
             ),
-            body=_dump_body(input, AITrackingTopicPatch, exclude_none=False),
-            response_model=DataResponse[AITrackingTopic],
+            body=_dump_body(input, PromptTrackerTopicPatch, exclude_none=False),
+            response_model=DataResponse[PromptTrackerTopic],
             request_options=request_options,
         )
 
-    def archive_ai_tracking_topic(
+    def archive_prompt_tracker_topic(
         self, project_id: str, id: str, request_options: RequestOptionsLike = None
-    ) -> DataResponse[AITrackingTopic]:
+    ) -> DataResponse[PromptTrackerTopic]:
         return self._request(
             "DELETE",
             (
-                f"/projects/{_encoded_path_segment(project_id, 'prj')}/ai-tracking/topics/"
+                f"/projects/{_encoded_path_segment(project_id, 'prj')}/prompt-tracker/topics/"
                 f"{require_tracking_id(id, 'ait')}"
             ),
-            response_model=DataResponse[AITrackingTopic],
+            response_model=DataResponse[PromptTrackerTopic],
             request_options=request_options,
         )
 
-    def list_ai_tracking_prompts(
+    def list_prompt_tracker_prompts(
         self,
         project_id: str,
         input: Mapping[str, Any] | None = None,
         request_options: RequestOptionsLike = None,
-    ) -> ListResponse[AITrackingPrompt]:
+    ) -> ListResponse[PromptTrackerPrompt]:
         return self._request(
             "GET",
-            f"/projects/{_encoded_path_segment(project_id, 'prj')}/ai-tracking/prompts",
+            f"/projects/{_encoded_path_segment(project_id, 'prj')}/prompt-tracker/prompts",
             query=dict(input or {}),
-            response_model=ListResponse[AITrackingPrompt],
+            response_model=ListResponse[PromptTrackerPrompt],
             request_options=request_options,
         )
 
-    def create_ai_tracking_prompt(
+    def create_prompt_tracker_prompt(
         self,
         project_id: str,
-        input: AITrackingPromptInput | Mapping[str, Any],
+        input: PromptTrackerPromptInput | Mapping[str, Any],
         request_options: RequestOptionsLike = None,
-    ) -> DataResponse[AITrackingPrompt]:
+    ) -> DataResponse[PromptTrackerPrompt]:
         return self._request(
             "POST",
-            f"/projects/{_encoded_path_segment(project_id, 'prj')}/ai-tracking/prompts",
-            body=_dump_body(input, AITrackingPromptInput),
-            response_model=DataResponse[AITrackingPrompt],
+            f"/projects/{_encoded_path_segment(project_id, 'prj')}/prompt-tracker/prompts",
+            body=_dump_body(input, PromptTrackerPromptInput),
+            response_model=DataResponse[PromptTrackerPrompt],
             request_options=request_options,
         )
 
-    def update_ai_tracking_prompt(
+    def update_prompt_tracker_prompt(
         self,
         project_id: str,
         id: str,
-        input: AITrackingPromptPatch | Mapping[str, Any],
+        input: PromptTrackerPromptPatch | Mapping[str, Any],
         request_options: RequestOptionsLike = None,
-    ) -> DataResponse[AITrackingPrompt]:
+    ) -> DataResponse[PromptTrackerPrompt]:
         return self._request(
             "PATCH",
             (
-                f"/projects/{_encoded_path_segment(project_id, 'prj')}/ai-tracking/prompts/"
+                f"/projects/{_encoded_path_segment(project_id, 'prj')}/prompt-tracker/prompts/"
                 f"{require_tracking_id(id, 'aip')}"
             ),
-            body=_dump_body(input, AITrackingPromptPatch, exclude_none=False),
-            response_model=DataResponse[AITrackingPrompt],
+            body=_dump_body(input, PromptTrackerPromptPatch, exclude_none=False),
+            response_model=DataResponse[PromptTrackerPrompt],
             request_options=request_options,
         )
 
-    def archive_ai_tracking_prompt(
+    def archive_prompt_tracker_prompt(
         self, project_id: str, id: str, request_options: RequestOptionsLike = None
-    ) -> DataResponse[AITrackingPrompt]:
+    ) -> DataResponse[PromptTrackerPrompt]:
         return self._request(
             "DELETE",
             (
-                f"/projects/{_encoded_path_segment(project_id, 'prj')}/ai-tracking/prompts/"
+                f"/projects/{_encoded_path_segment(project_id, 'prj')}/prompt-tracker/prompts/"
                 f"{require_tracking_id(id, 'aip')}"
             ),
-            response_model=DataResponse[AITrackingPrompt],
+            response_model=DataResponse[PromptTrackerPrompt],
             request_options=request_options,
         )
 
-    def list_ai_tracking_schedules(
+    def list_prompt_tracker_schedules(
         self,
         project_id: str,
         input: Mapping[str, Any] | None = None,
         request_options: RequestOptionsLike = None,
-    ) -> ListResponse[AITrackingSchedule]:
+    ) -> ListResponse[PromptTrackerSchedule]:
         return self._request(
             "GET",
-            f"/projects/{_encoded_path_segment(project_id, 'prj')}/ai-tracking/schedules",
+            f"/projects/{_encoded_path_segment(project_id, 'prj')}/prompt-tracker/schedules",
             query=dict(input or {}),
-            response_model=ListResponse[AITrackingSchedule],
+            response_model=ListResponse[PromptTrackerSchedule],
             request_options=request_options,
         )
 
-    def create_ai_tracking_schedule(
+    def create_prompt_tracker_schedule(
         self,
         project_id: str,
-        input: AITrackingScheduleInput | Mapping[str, Any],
+        input: PromptTrackerScheduleInput | Mapping[str, Any],
         request_options: RequestOptionsLike = None,
-    ) -> DataResponse[AITrackingSchedule]:
+    ) -> DataResponse[PromptTrackerSchedule]:
         return self._request(
             "POST",
-            f"/projects/{_encoded_path_segment(project_id, 'prj')}/ai-tracking/schedules",
-            body=_dump_body(input, AITrackingScheduleInput),
-            response_model=DataResponse[AITrackingSchedule],
+            f"/projects/{_encoded_path_segment(project_id, 'prj')}/prompt-tracker/schedules",
+            body=_dump_body(input, PromptTrackerScheduleInput),
+            response_model=DataResponse[PromptTrackerSchedule],
             request_options=request_options,
         )
 
-    def update_ai_tracking_schedule(
+    def update_prompt_tracker_schedule(
         self,
         project_id: str,
         id: str,
-        input: AITrackingSchedulePatch | AITrackingScheduleInput | Mapping[str, Any],
+        input: PromptTrackerSchedulePatch | PromptTrackerScheduleInput | Mapping[str, Any],
         request_options: RequestOptionsLike = None,
-    ) -> DataResponse[AITrackingSchedule]:
-        if isinstance(input, AITrackingScheduleInput):
+    ) -> DataResponse[PromptTrackerSchedule]:
+        if isinstance(input, PromptTrackerScheduleInput):
             # Normalize legacy callers who pass the full create input: the API
             # treats the PATCH as a partial, so promote to the patch model
             # before dumping and keep ``consent`` at the top level.
-            input = AITrackingSchedulePatch.model_validate(
+            input = PromptTrackerSchedulePatch.model_validate(
                 input.model_dump(mode="python", exclude_unset=True, by_alias=False)
             )
         return self._request(
             "PATCH",
             (
-                f"/projects/{_encoded_path_segment(project_id, 'prj')}/ai-tracking/schedules/"
+                f"/projects/{_encoded_path_segment(project_id, 'prj')}/prompt-tracker/schedules/"
                 f"{require_tracking_id(id, 'ais')}"
             ),
-            body=_dump_body(input, AITrackingSchedulePatch, exclude_none=False),
-            response_model=DataResponse[AITrackingSchedule],
+            body=_dump_body(input, PromptTrackerSchedulePatch, exclude_none=False),
+            response_model=DataResponse[PromptTrackerSchedule],
             request_options=request_options,
         )
 
-    def archive_ai_tracking_schedule(
+    def archive_prompt_tracker_schedule(
         self, project_id: str, id: str, request_options: RequestOptionsLike = None
-    ) -> DataResponse[AITrackingSchedule]:
+    ) -> DataResponse[PromptTrackerSchedule]:
         return self._request(
             "DELETE",
             (
-                f"/projects/{_encoded_path_segment(project_id, 'prj')}/ai-tracking/schedules/"
+                f"/projects/{_encoded_path_segment(project_id, 'prj')}/prompt-tracker/schedules/"
                 f"{require_tracking_id(id, 'ais')}"
             ),
-            response_model=DataResponse[AITrackingSchedule],
+            response_model=DataResponse[PromptTrackerSchedule],
             request_options=request_options,
         )
 
-    def preview_ai_tracking_run(
+    def preview_prompt_tracker_run(
         self,
         project_id: str,
-        input: AITrackingPreviewInput | Mapping[str, Any],
+        input: PromptTrackerPreviewInput | Mapping[str, Any],
         request_options: RequestOptionsLike = None,
-    ) -> DataResponse[AITrackingPreview]:
+    ) -> DataResponse[PromptTrackerPreview]:
         return self._request(
             "POST",
-            f"/projects/{_encoded_path_segment(project_id, 'prj')}/ai-tracking/runs/preview",
-            body=_dump_body(input, AITrackingPreviewInput),
-            response_model=DataResponse[AITrackingPreview],
+            f"/projects/{_encoded_path_segment(project_id, 'prj')}/prompt-tracker/runs/preview",
+            body=_dump_body(input, PromptTrackerPreviewInput),
+            response_model=DataResponse[PromptTrackerPreview],
             request_options=request_options,
         )
 
-    def create_ai_tracking_run(
+    def create_prompt_tracker_run(
         self,
         project_id: str,
-        input: AITrackingRunInput | Mapping[str, Any],
+        input: PromptTrackerRunInput | Mapping[str, Any],
         request_options: RequestOptionsLike = None,
-    ) -> DataResponse[AITrackingRun]:
+    ) -> DataResponse[PromptTrackerRun]:
         if not _coerce_request_options(request_options).idempotency_key:
             raise BisibilityConfigurationError("Idempotency-Key is required for tracking launch.")
         return self._request(
             "POST",
-            f"/projects/{_encoded_path_segment(project_id, 'prj')}/ai-tracking/runs",
-            body=_dump_body(input, AITrackingRunInput),
-            response_model=DataResponse[AITrackingRun],
+            f"/projects/{_encoded_path_segment(project_id, 'prj')}/prompt-tracker/runs",
+            body=_dump_body(input, PromptTrackerRunInput),
+            response_model=DataResponse[PromptTrackerRun],
             request_options=request_options,
         )
 
-    def list_ai_tracking_runs(
+    def list_prompt_tracker_runs(
         self,
         project_id: str,
         input: Mapping[str, Any] | None = None,
         request_options: RequestOptionsLike = None,
-    ) -> ListResponse[AITrackingRun]:
+    ) -> ListResponse[PromptTrackerRun]:
         return self._request(
             "GET",
-            f"/projects/{_encoded_path_segment(project_id, 'prj')}/ai-tracking/runs",
+            f"/projects/{_encoded_path_segment(project_id, 'prj')}/prompt-tracker/runs",
             query=dict(input or {}),
-            response_model=ListResponse[AITrackingRun],
+            response_model=ListResponse[PromptTrackerRun],
             request_options=request_options,
         )
 
-    def get_ai_tracking_run(
+    def get_prompt_tracker_run(
         self, project_id: str, id: str, request_options: RequestOptionsLike = None
-    ) -> DataResponse[AITrackingRun]:
+    ) -> DataResponse[PromptTrackerRun]:
         return self._request(
             "GET",
             (
-                f"/projects/{_encoded_path_segment(project_id, 'prj')}/ai-tracking/runs/"
+                f"/projects/{_encoded_path_segment(project_id, 'prj')}/prompt-tracker/runs/"
                 f"{require_tracking_id(id, 'air')}"
             ),
-            response_model=DataResponse[AITrackingRun],
+            response_model=DataResponse[PromptTrackerRun],
             request_options=request_options,
         )
 
-    def list_ai_tracking_samples(
+    def list_prompt_tracker_samples(
         self,
         project_id: str,
         id: str,
         input: Mapping[str, Any] | None = None,
         request_options: RequestOptionsLike = None,
-    ) -> ListResponse[AITrackingSample]:
+    ) -> ListResponse[PromptTrackerSample]:
         return self._request(
             "GET",
             (
-                f"/projects/{_encoded_path_segment(project_id, 'prj')}/ai-tracking/runs/"
+                f"/projects/{_encoded_path_segment(project_id, 'prj')}/prompt-tracker/runs/"
                 f"{require_tracking_id(id, 'air')}/samples"
             ),
             query=dict(input or {}),
-            response_model=ListResponse[AITrackingSample],
+            response_model=ListResponse[PromptTrackerSample],
             request_options=request_options,
         )
 
-    def cancel_ai_tracking_run(
+    def cancel_prompt_tracker_run(
         self, project_id: str, id: str, request_options: RequestOptionsLike = None
-    ) -> DataResponse[AITrackingRun]:
+    ) -> DataResponse[PromptTrackerRun]:
         return self._request(
             "POST",
             (
-                f"/projects/{_encoded_path_segment(project_id, 'prj')}/ai-tracking/runs/"
+                f"/projects/{_encoded_path_segment(project_id, 'prj')}/prompt-tracker/runs/"
                 f"{require_tracking_id(id, 'air')}/cancel"
             ),
-            response_model=DataResponse[AITrackingRun],
+            response_model=DataResponse[PromptTrackerRun],
             request_options=request_options,
         )
 
-    def retry_ai_tracking_run(
+    def retry_prompt_tracker_run(
         self,
         project_id: str,
         id: str,
-        input: AITrackingRunInput | Mapping[str, Any],
+        input: PromptTrackerRunInput | Mapping[str, Any],
         request_options: RequestOptionsLike = None,
-    ) -> DataResponse[AITrackingRun]:
+    ) -> DataResponse[PromptTrackerRun]:
         if not _coerce_request_options(request_options).idempotency_key:
             raise BisibilityConfigurationError("Idempotency-Key is required for tracking retry.")
         return self._request(
             "POST",
             (
-                f"/projects/{_encoded_path_segment(project_id, 'prj')}/ai-tracking/runs/"
+                f"/projects/{_encoded_path_segment(project_id, 'prj')}/prompt-tracker/runs/"
                 f"{require_tracking_id(id, 'air')}/retry"
             ),
-            body=_dump_body(input, AITrackingRunInput),
-            response_model=DataResponse[AITrackingRun],
+            body=_dump_body(input, PromptTrackerRunInput),
+            response_model=DataResponse[PromptTrackerRun],
             request_options=request_options,
         )
 
-    def get_ai_tracking_history(
+    def get_prompt_tracker_history(
         self,
         project_id: str,
         input: Mapping[str, Any] | None = None,
         request_options: RequestOptionsLike = None,
-    ) -> ListResponse[AITrackingRun]:
+    ) -> ListResponse[PromptTrackerRun]:
         return self._request(
             "GET",
-            f"/projects/{_encoded_path_segment(project_id, 'prj')}/ai-tracking/history",
+            f"/projects/{_encoded_path_segment(project_id, 'prj')}/prompt-tracker/history",
             query=dict(input or {}),
-            response_model=ListResponse[AITrackingRun],
+            response_model=ListResponse[PromptTrackerRun],
             request_options=request_options,
         )
 
-    def get_ai_tracking_trends(
+    def get_prompt_tracker_trends(
         self,
         project_id: str,
-        input: AITrackingTrendOptions | Mapping[str, Any],
+        input: PromptTrackerTrendOptions | Mapping[str, Any],
         request_options: RequestOptionsLike = None,
-    ) -> DataResponse[AITrackingTrends]:
+    ) -> DataResponse[PromptTrackerTrends]:
         return self._request(
             "GET",
-            f"/projects/{_encoded_path_segment(project_id, 'prj')}/ai-tracking/trends",
-            query=_dump_body(input, AITrackingTrendOptions),
-            response_model=DataResponse[AITrackingTrends],
+            f"/projects/{_encoded_path_segment(project_id, 'prj')}/prompt-tracker/trends",
+            query=_dump_body(input, PromptTrackerTrendOptions),
+            response_model=DataResponse[PromptTrackerTrends],
             request_options=request_options,
         )
 
-    def export_ai_tracking_evidence(
+    def export_prompt_tracker_evidence(
         self,
         project_id: str,
-        input: AITrackingEvidenceOptions | Mapping[str, Any],
+        input: PromptTrackerEvidenceOptions | Mapping[str, Any],
         request_options: RequestOptionsLike = None,
-    ) -> DataResponse[AITrackingExport] | str:
-        payload = _dump_body(input, AITrackingEvidenceOptions)
+    ) -> DataResponse[PromptTrackerExport] | str:
+        payload = _dump_body(input, PromptTrackerEvidenceOptions)
         if payload.get("format") == "csv":
             return self._request(
                 "GET",
-                f"/projects/{_encoded_path_segment(project_id, 'prj')}/ai-tracking/export",
+                f"/projects/{_encoded_path_segment(project_id, 'prj')}/prompt-tracker/export",
                 query=payload,
                 parse_as="text",
                 request_options=request_options,
             )
         return self._request(
             "GET",
-            f"/projects/{_encoded_path_segment(project_id, 'prj')}/ai-tracking/export",
+            f"/projects/{_encoded_path_segment(project_id, 'prj')}/prompt-tracker/export",
             query=payload,
-            response_model=DataResponse[AITrackingExport],
+            response_model=DataResponse[PromptTrackerExport],
             request_options=request_options,
         )
 
-    def suggest_ai_tracking_prompts(
+    def suggest_prompt_research_prompts(
         self,
         project_id: str,
         request_options: RequestOptionsLike = None,
-    ) -> DataResponse[AITrackingSuggestions]:
+    ) -> DataResponse[PromptResearchSuggestions]:
         return self._request(
             "POST",
-            f"/projects/{_encoded_path_segment(project_id, 'prj')}/ai-tracking/suggestions",
+            f"/projects/{_encoded_path_segment(project_id, 'prj')}/prompt-research/suggestions",
             body={},
-            response_model=DataResponse[AITrackingSuggestions],
+            response_model=DataResponse[PromptResearchSuggestions],
             request_options=request_options,
         )
 
-    def accept_ai_tracking_suggestions(
+    def accept_prompt_research_suggestions(
         self,
         project_id: str,
-        input: AITrackingAcceptanceInput | Mapping[str, Any],
+        input: PromptResearchAcceptanceInput | Mapping[str, Any],
         request_options: RequestOptionsLike = None,
-    ) -> DataResponse[AITrackingAcceptance]:
+    ) -> DataResponse[PromptResearchAcceptance]:
         return self._request(
             "POST",
-            f"/projects/{_encoded_path_segment(project_id, 'prj')}/ai-tracking/suggestions/accept",
-            body=_dump_body(input, AITrackingAcceptanceInput),
-            response_model=DataResponse[AITrackingAcceptance],
+            f"/projects/{_encoded_path_segment(project_id, 'prj')}"
+            "/prompt-research/suggestions/accept",
+            body=_dump_body(input, PromptResearchAcceptanceInput),
+            response_model=DataResponse[PromptResearchAcceptance],
             request_options=request_options,
         )
 
@@ -1237,8 +1266,10 @@ class BisibilityClient:
     ) -> AccountAnalyticsConsent:
         """Read account analytics permission; replay is browser-local."""
         return self._request(
-            "GET", "/me/analytics-consent",
-            response_model=AccountAnalyticsConsent, request_options=request_options,
+            "GET",
+            "/me/analytics-consent",
+            response_model=AccountAnalyticsConsent,
+            request_options=request_options,
         )
 
     def update_analytics_consent(
@@ -1248,9 +1279,11 @@ class BisibilityClient:
     ) -> AccountAnalyticsConsent:
         """Store an explicit idempotent account analytics decision."""
         return self._request(
-            "PUT", "/me/analytics-consent",
+            "PUT",
+            "/me/analytics-consent",
             body=_dump_body(input, UpdateAnalyticsConsentInput),
-            response_model=AccountAnalyticsConsent, request_options=request_options,
+            response_model=AccountAnalyticsConsent,
+            request_options=request_options,
         )
 
     def get_me(self, request_options: RequestOptionsLike = None) -> Me:
@@ -2443,6 +2476,169 @@ class BisibilityClient:
             request_options=request_options,
         )
 
+    def get_page_indexing_report(
+        self,
+        project_id: str,
+        request_options: RequestOptionsLike = None,
+    ) -> PageIndexingReport:
+        """Read stored completeness, freshness and reasons without calling Google.
+
+        No Credits are charged. Results reflect Google's known indexed state, not
+        a live test, and may be partial or delayed. complete=False means this is
+        not a full-site census. Manual-only URLs do not affect report totals.
+        """
+        return self._request(
+            "GET",
+            f"/projects/{_encoded_path_segment(project_id, 'prj')}/search-index/report",
+            response_model=PageIndexingReport,
+            request_options=request_options,
+        )
+
+    def list_page_indexing_urls(
+        self,
+        project_id: str,
+        options: ListPageIndexingUrlsOptions | Mapping[str, Any] | None = None,
+        request_options: RequestOptionsLike = None,
+    ) -> PageIndexingUrls:
+        """Read stored URLs, optionally with the latest 100 changes per URL.
+
+        No Credits are charged and Google is not called. Results reflect Google's
+        known indexed state, not a live test, and may be partial or delayed.
+        Pass meta.next_cursor unchanged; limit is 1-100 (server default 50).
+        changed_since includes stored tracked changes at or after that time, before pagination.
+        history="true" includes history and its completeness flag. Manual-only URLs
+        require source="manual". coverage_state="Unspecified" matches missing states
+        in indexed/not_indexed groups; filter inspection_failed/not_checked by group
+        alone. checked_at is the last Google result; inspection_failed_at is the
+        last failed attempt.
+        """
+        filters = _dump_options(options, ListPageIndexingUrlsOptions)
+        return self._request(
+            "GET",
+            f"/projects/{_encoded_path_segment(project_id, 'prj')}/search-index/urls",
+            query={
+                "group": filters.get("group"),
+                "coverage_state": filters.get("coverage_state"),
+                "sitemap": filters.get("sitemap"),
+                "source": filters.get("source"),
+                "search": filters.get("search"),
+                "changed_since": filters.get("changed_since"),
+                "cursor": filters.get("cursor"),
+                "limit": filters.get("limit"),
+                "history": filters.get("history"),
+            },
+            response_model=PageIndexingUrls,
+            request_options=request_options,
+        )
+
+    def get_page_indexing_settings(
+        self,
+        project_id: str,
+        request_options: RequestOptionsLike = None,
+    ) -> PageIndexingSettings:
+        """Read inspection settings and estimated shared usage, without Google calls.
+
+        No Credits are charged. next_reset_at is Pacific midnight. Indexed results
+        reflect Google's known state, not a live test, and may be partial or delayed.
+        """
+        return self._request(
+            "GET",
+            f"/projects/{_encoded_path_segment(project_id, 'prj')}/search-index/settings",
+            response_model=PageIndexingSettings,
+            request_options=request_options,
+        )
+
+    def update_page_indexing_settings(
+        self,
+        project_id: str,
+        input: PageIndexingSettingsPatch | Mapping[str, Any],
+        request_options: RequestOptionsLike = None,
+    ) -> PageIndexingSettings:
+        """Update at least one inspection setting; write scope is required.
+
+        No Credits are charged and Google is not called. off disables background
+        inspections; fixed uses a project daily limit of 0-2000; available_quota is
+        self-host only. Manual and background inspections share the property counter
+        and reset at Pacific midnight. RequestOptions.idempotency_key supports replay.
+        Indexed results reflect Google's known state, not a live test, and may be
+        partial or delayed.
+        """
+        return self._request(
+            "PATCH",
+            f"/projects/{_encoded_path_segment(project_id, 'prj')}/search-index/settings",
+            body=_dump_body(input, PageIndexingSettingsPatch),
+            response_model=PageIndexingSettings,
+            request_options=request_options,
+        )
+
+    def list_search_index_sitemaps(
+        self,
+        project_id: str,
+        request_options: RequestOptionsLike = None,
+    ) -> SearchIndexSitemaps:
+        """Read sitemaps from the connected property, with no Credits charged.
+
+        Results reflect Google's known indexed state, not a live test, and may
+        be partial or delayed.
+        """
+        return self._request(
+            "GET",
+            f"/projects/{_encoded_path_segment(project_id, 'prj')}/search-index/sitemaps",
+            response_model=SearchIndexSitemaps,
+            request_options=request_options,
+        )
+
+    def get_search_index_sitemap(
+        self,
+        project_id: str,
+        path: str,
+        request_options: RequestOptionsLike = None,
+    ) -> SearchIndexSitemapResponse:
+        """Read a full sitemap URL in the connected property, with no Credits charged.
+
+        path must be an absolute HTTP or HTTPS URL of 1-2048 characters;
+        otherwise, raises BisibilityConfigurationError.
+        Pass the unencoded URL; it is encoded as one path segment. Results reflect
+        Google's known indexed state, not a live test, and may be partial or delayed.
+        """
+        path = _require_sitemap_url(path)
+        return self._request(
+            "GET",
+            (
+                f"/projects/{_encoded_path_segment(project_id, 'prj')}/search-index/sitemaps/"
+                f"{_encoded_natural_path_segment(path)}"
+            ),
+            response_model=SearchIndexSitemapResponse,
+            request_options=request_options,
+        )
+
+    def inspect_search_index_urls(
+        self,
+        project_id: str,
+        input: SearchIndexInspectionInput | Mapping[str, Any],
+        request_options: RequestOptionsLike = None,
+    ) -> SearchIndexInspections:
+        """Inspect 1-10 URLs in the connected property; write scope is required.
+
+        No Credits are charged. Every URL sent to Google counts against the shared
+        project daily inspection allowance, even on failure. This is an estimate
+        because other tools consume quota too; it resets at Pacific midnight.
+        URLs are normalized and deduplicated by the server before Google calls.
+        Per-URL failures are returned even on HTTP 200. provider_rate_limited carries
+        reset_at and scope (daily, minute, unknown) and stops further batch calls.
+        Results reflect Google's known indexed state, not a live test, and may be
+        partial or delayed. Use RequestOptions.idempotency_key to replay a response
+        without another inspection.
+        """
+        return self._request(
+            "POST",
+            f"/projects/{_encoded_path_segment(project_id, 'prj')}/search-index/inspections",
+            body=_dump_body(input, SearchIndexInspectionInput),
+            response_model=SearchIndexInspections,
+            request_options=request_options,
+            paid=True,
+        )
+
     def list_sitemap_monitors(
         self,
         project_id: str,
@@ -2688,6 +2884,9 @@ class BisibilityClient:
         the provider and renumbers the chain; any other value reorders it. Omit it to
         keep a reconnected provider's place and append a new one. The deprecated
         ``primary=True`` still maps to priority ``0``; ``primary=False`` is a no-op.
+
+        A new SERP connection starts disabled unless no other SERP connection is
+        enabled, and is placed after existing SERP connections.
 
         Analytics providers take their credentials in ``credentials``. For Plausible,
         ``credentials.login`` is the site domain configured in Plausible (its
@@ -2985,12 +3184,12 @@ class BisibilityClient:
         project_id: str,
         input: NotificationPreferencesPatch | Mapping[str, Any],
         request_options: RequestOptionsLike = None,
-    ) -> NotificationPreferences:
+    ) -> NotificationPreferencesUpdated:
         return self._request(
             "PATCH",
             f"/projects/{_encoded_path_segment(project_id, 'prj')}/notification-preferences",
-            body=input,
-            response_model=NotificationPreferences,
+            body=_dump_body(input, NotificationPreferencesPatch),
+            response_model=NotificationPreferencesUpdated,
             request_options=request_options,
         )
 

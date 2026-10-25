@@ -263,9 +263,9 @@ RESEARCH_FIXTURES = {
         ("run_site_audit", "POST", "site-audits", {"max_pages": 2}, "site"),
         ("get_site_audit", "GET", "site-audits/agr_a00000000000000000000000", None, "site"),
         (
-            "analyze_ai_visibility",
+            "analyze_brand_visibility",
             "POST",
-            "ai-visibility",
+            "brand-visibility",
             {
                 "brand": "Example",
                 "domain": "example.com",
@@ -284,6 +284,20 @@ RESEARCH_FIXTURES = {
                 "max_cost_cents": 2,
                 "prompt": "Example",
                 "models": ["gpt-4.1-mini"],
+            },
+            "ai",
+        ),
+        (
+            "compare_ai_prompts",
+            "POST",
+            "prompt-explorer",
+            {
+                "brand": "Example",
+                "domain": "example.com",
+                "max_cost_cents": 60,
+                "prompt": "Example",
+                "engines": ["chat_gpt", "claude"],
+                "web_search": True,
             },
             "ai",
         ),
@@ -331,7 +345,7 @@ def test_research_workspace_operations(name, method, suffix, body, fixture):
             ["prj_a00000000000000000000000", {"kind": "site_audit", "title": "Title", "body": {}}],
         ),
         (
-            "analyze_ai_visibility",
+            "analyze_brand_visibility",
             [
                 "prj_a00000000000000000000000",
                 {"brand": "Example", "domain": "example.com", "max_cost_cents": -1},
@@ -362,7 +376,7 @@ def test_research_workspace_rejects_incomplete_ai_report():
         transport=httpx.MockTransport(handler),
     ) as client:
         with pytest.raises(BisibilityResponseError):
-            client.analyze_ai_visibility(
+            client.analyze_brand_visibility(
                 "prj_a00000000000000000000000",
                 {"brand": "Example", "domain": "example.com", "max_cost_cents": 0},
             )
@@ -415,3 +429,43 @@ def test_agent_report_cursor_iterator_preserves_filters(async_mode: bool) -> Non
     assert [r.url.params["limit"] for r in requests] == ["1"] * 2
     assert "cursor" not in requests[0].url.params
     assert requests[1].url.params["cursor"] == cursor
+
+
+@pytest.mark.parametrize(
+    "extra",
+    [
+        {"models": ["gpt-4.1-mini"]},
+        {"max_output_tokens": 1024},
+        {"engines": ["claude", "claude"]},
+        {"engines": ["google"]},
+        {"engines": []},
+    ],
+)
+def test_compare_ai_prompts_engine_mode_rejects_conflicting_options(extra):
+    from bisibility.models import CompareAIPromptsOptions
+
+    base = {
+        "brand": "Example",
+        "domain": "example.com",
+        "max_cost_cents": 60,
+        "prompt": "Example",
+        "engines": ["claude"],
+    }
+    with pytest.raises(ValueError):
+        CompareAIPromptsOptions.model_validate({**base, **extra})
+
+
+def test_compare_ai_prompts_engine_mode_omits_default_model_fields():
+    from bisibility.models import CompareAIPromptsOptions
+
+    body = CompareAIPromptsOptions.model_validate(
+        {
+            "brand": "Example",
+            "domain": "example.com",
+            "max_cost_cents": 60,
+            "prompt": "Example",
+            "engines": ["gemini"],
+        }
+    ).model_dump(mode="python", by_alias=True, exclude_none=True, exclude_unset=True)
+    assert body["engines"] == ["gemini"]
+    assert "models" not in body and "max_output_tokens" not in body

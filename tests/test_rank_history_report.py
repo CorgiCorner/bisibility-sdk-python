@@ -47,7 +47,7 @@ def test_async_actual_report_roundtrip(stream: str) -> None:
                 ),
             )
         assert isinstance(result, RankHistoryReportResponse)
-        assert result.model_dump(mode="json", by_alias=True) == FIXTURE[stream]
+        assert result.model_dump(mode="json", by_alias=True, exclude_unset=True) == FIXTURE[stream]
 
     asyncio.run(scenario())
     assert len(requests) == 1
@@ -83,7 +83,7 @@ def test_actual_report_fields_and_endpoint_owned_cursor(stream: str) -> None:
         )
         result = client.export_rank_history(PROJECT, options)
     assert isinstance(result, RankHistoryReportResponse)
-    assert result.model_dump(mode="json", by_alias=True) == FIXTURE[stream]
+    assert result.model_dump(mode="json", by_alias=True, exclude_unset=True) == FIXTURE[stream]
     assert len(requests) == 1
     assert requests[0].url.params["version"] == "2"
     assert requests[0].url.params["from"] == options.from_
@@ -140,7 +140,9 @@ def test_all_actual_signed_pages_and_legacy_envelope() -> None:
                 ),
             )
             assert isinstance(page, RankHistoryReportResponse)
-            records.extend(row.model_dump(mode="json", by_alias=True) for row in page.data)
+            records.extend(
+                row.model_dump(mode="json", by_alias=True, exclude_unset=True) for row in page.data
+            )
             cursor = page.meta.next_cursor
             if cursor is None:
                 break
@@ -215,7 +217,7 @@ def test_future_output_metadata_preserves_shapes_and_versions() -> None:
     report["normalized_items"]["completeness"] = "future_retention"
     report["normalized_items"]["is_truncated"] = True
     parsed = RankHistoryReportResponse.model_validate(future)
-    assert parsed.model_dump(mode="json", by_alias=True) == future
+    assert parsed.model_dump(mode="json", by_alias=True, exclude_unset=True) == future
     report["version"] = 3
     with pytest.raises(ValidationError):
         RankHistoryReportResponse.model_validate(future)

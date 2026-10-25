@@ -8,6 +8,7 @@ from pydantic import AfterValidator, ConfigDict, Field, StrictBool, TypeAdapter
 
 from .model_base import BisibilityModel
 from .models import CursorV3, ListResponse
+from .provider_evidence import RankCheckRunEvidenceProjection
 from .public_ids import ProjectId, RankCheckRunId
 
 RunCount = Annotated[int, Field(strict=True, ge=0)]
@@ -38,6 +39,7 @@ class RankCheckRunNativeEstimate(BisibilityModel):
 
 
 class RankCheckRunRead(BisibilityModel):
+    evidence_projections: list[RankCheckRunEvidenceProjection] | None = None
     id: RankCheckRunId
     project_id: ProjectId
     status: str

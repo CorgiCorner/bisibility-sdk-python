@@ -10,8 +10,10 @@ from typing import Annotated, Any, ClassVar, Generic, Literal, TypeAlias, TypeVa
 from pydantic import (
     AfterValidator,
     AliasChoices,
+    BeforeValidator,
     ConfigDict,
     Field,
+    StrictBool,
     TypeAdapter,
     field_validator,
     model_validator,
@@ -19,6 +21,7 @@ from pydantic import (
 
 from .defaults_review import ProjectDefaultsReview
 from .model_base import BisibilityModel as BisibilityModel
+from .provider_evidence import ProviderEvidenceProjection, ResultCompleteness, ReturnedDepth
 from .public_ids import (
     PUBLIC_ID_PREFIXES,
     PUBLIC_ID_SUFFIX_PATTERN,
@@ -1005,7 +1008,27 @@ class RankCheckRunMetadata(BisibilityModel):
     trigger: str
 
 
+def _non_null_when_present(value: Any) -> Any:
+    if value is None:
+        raise ValueError("Omit this field instead of sending null.")
+    return value
+
+
+def _comparison_disallowed(value: Any) -> Any:
+    if value is not False:
+        raise ValueError("comparison_allowed must be false when present.")
+    return value
+
+
 class RankCheck(BisibilityModel):
+    comparison_allowed: Annotated[
+        Literal[False] | None, BeforeValidator(_comparison_disallowed)
+    ] = None
+    evidence_projection: ProviderEvidenceProjection | None = None
+    result_completeness: Annotated[
+        ResultCompleteness | None, BeforeValidator(_non_null_when_present)
+    ] = None
+    returned_depth: ReturnedDepth | None = None
     error_code: str | None = None
     usage: RankCheckUsage | None = None
     run: RankCheckRunMetadata | None = None
@@ -1045,6 +1068,7 @@ class RunRankCheckResultAdapter:
 
 
 class RankHistoryExportRow(BisibilityModel):
+    evidence_projection: ProviderEvidenceProjection | None = None
     provider: str | None = None
     requested_depth: int | None = None
     normalization_version: str | None = None
@@ -1408,7 +1432,11 @@ class ProviderDrawer(BisibilityModel):
 class Provider(BisibilityModel):
     description: str | None = None
     drawer: ProviderDrawer | None = None
-    enabled: bool | None = None
+    enabled: bool | None = Field(
+        default=None,
+        description="Whether rank checks use this connection. A new SERP connection starts "
+        "disabled unless no other SERP connection is enabled.",
+    )
     icon: str | None = None
     id: str
     connection_id: ConnectionId | None = None
@@ -1416,7 +1444,11 @@ class Provider(BisibilityModel):
     meta: list[ProviderMetaRow] | None = None
     name: str | None = None
     primary: bool | None = None
-    priority: int | None = None
+    priority: int | None = Field(
+        default=None,
+        description="Order among connections of this kind, lowest first. A new SERP connection "
+        "is placed after existing SERP connections.",
+    )
     secondary_action: str | None = None
     status: str | None = None
     tint: str | None = None
@@ -1609,13 +1641,31 @@ class CompetitorRemoveResult(BisibilityModel):
     removed: bool
 
 
+CheckNotificationSettingInput: TypeAlias = Literal["all", "important", "none"]
+CheckNotificationSetting: TypeAlias = CheckNotificationSettingInput | str
+_CheckNotificationThreshold = Annotated[
+    int | None, Field(strict=True, ge=1, le=100), BeforeValidator(_non_null_when_present)
+]
+_CheckIncidentPreference = Annotated[StrictBool | None, BeforeValidator(_non_null_when_present)]
+
+
 class NotificationPreferences(BisibilityModel):
+    # Optional defaults preserve responses from servers predating check summaries.
+    check_notification_setting: Annotated[
+        CheckNotificationSetting | None, BeforeValidator(_non_null_when_present)
+    ] = None
+    check_notification_top_n: _CheckNotificationThreshold = None
+    check_notification_position_move: _CheckNotificationThreshold = None
+    provider_incident_in_app: _CheckIncidentPreference = None
     alert_email: bool
     alert_in_app: bool
     alert_slack: bool
     alert_webhook: bool
     check_email: bool
-    check_in_app: bool
+    check_in_app: bool = Field(
+        deprecated="Read-only compatibility value; writes are ignored. "
+        "Use check_notification_setting."
+    )
     email: str | None = None
     email_verification: Literal["unverified", "verified"] | None = None
     import_email: bool
@@ -1627,13 +1677,33 @@ class NotificationPreferences(BisibilityModel):
     webhook_available: bool | None = None
 
 
+class NotificationPreferenceWarning(BisibilityModel):
+    code: str
+    field: str
+    message: str
+
+
+class NotificationPreferencesUpdated(NotificationPreferences):
+    warnings: Annotated[
+        list[NotificationPreferenceWarning] | None, BeforeValidator(_non_null_when_present)
+    ] = None
+
+
 class NotificationPreferencesPatch(BisibilityModel):
+    check_notification_setting: Annotated[
+        CheckNotificationSettingInput | None, BeforeValidator(_non_null_when_present)
+    ] = None
+    check_notification_top_n: _CheckNotificationThreshold = None
+    check_notification_position_move: _CheckNotificationThreshold = None
+    provider_incident_in_app: _CheckIncidentPreference = None
     alert_email: bool | None = None
     alert_in_app: bool | None = None
     alert_slack: bool | None = None
     alert_webhook: bool | None = None
     check_email: bool | None = None
-    check_in_app: bool | None = None
+    check_in_app: bool | None = Field(
+        default=None, deprecated="Ignored on writes; use check_notification_setting."
+    )
     import_email: bool | None = None
     import_in_app: bool | None = None
     invite_email: bool | None = None
@@ -1835,10 +1905,20 @@ class CloudImportAlertRule(CloudImportModel):
 
 
 class CloudImportNotificationPreference(CloudImportModel):
+    check_notification_setting: Annotated[
+        CheckNotificationSettingInput | None, BeforeValidator(_non_null_when_present)
+    ] = None
+    check_notification_top_n: _CheckNotificationThreshold = None
+    check_notification_position_move: _CheckNotificationThreshold = None
+    provider_incident_in_app: _CheckIncidentPreference = None
     alert_email: bool | None = None
     alert_in_app: bool | None = None
     check_email: bool | None = None
-    check_in_app: bool | None = None
+    check_in_app: bool | None = Field(
+        default=None,
+        deprecated="Preserved for portability; legacy rows import as Important "
+        "regardless of this value.",
+    )
     import_email: bool | None = None
     import_in_app: bool | None = None
     invite_email: bool | None = None
@@ -2625,12 +2705,15 @@ class AIResearchInput(BisibilityModel):
     fresh: bool | None = None
 
 
-class AnalyzeAIVisibilityOptions(AIResearchInput):
+class AnalyzeBrandVisibilityOptions(AIResearchInput):
     language_code: Annotated[str, Field(pattern=r"^[a-z]{2}(?:-[A-Z]{2})?$")] | None = None
     limit: int | None = Field(default=None, ge=1, le=20)
     location_code: int | None = Field(default=None, ge=1, le=9007199254740991)
     platform: Literal["chat_gpt", "google"] | None = None
     target_type: Literal["brand", "domain"] | None = None
+
+
+AIEngine = Literal["chat_gpt", "claude", "gemini", "perplexity"]
 
 
 class CompareAIPromptsOptions(AIResearchInput):
@@ -2652,11 +2735,23 @@ class CompareAIPromptsOptions(AIResearchInput):
     country_iso_code: Annotated[str, Field(pattern=r"^[A-Z]{2}$")] | None = None
     response_language: Annotated[str, Field(pattern=r"^[a-z]{2,3}(?:-[a-zA-Z0-9]{2,4})?$")] = "en"
     max_output_tokens: int = Field(default=512, ge=16, le=4096)
+    # Engine mode on Credits: each engine answers with its calibrated flagship model.
+    engines: Annotated[list[AIEngine], Field(min_length=1, max_length=4)] | None = None
 
     @model_validator(mode="after")
     def validate_cost_policy(self) -> CompareAIPromptsOptions:
         if self.country_iso_code and not self.web_search:
             raise ValueError("Country hints require web search.")
+        if self.engines is not None:
+            if len(set(self.engines)) != len(self.engines):
+                raise ValueError("Engines must be distinct.")
+            if self.models is not None or "max_output_tokens" in self.model_fields_set:
+                raise ValueError(
+                    "Engine mode runs each engine's calibrated model. Omit models and "
+                    "max_output_tokens."
+                )
+            if self.cost_policy != "hard_cap":
+                raise ValueError("Engine mode is available with Credits and a hard cost cap only.")
         if self.models and len(set(self.models)) != len(self.models):
             raise ValueError("Models must be distinct.")
         if len(self.prompt.encode("utf-8")) > 2000:
@@ -2699,6 +2794,9 @@ class AIAnalysisCitation(BisibilityModel):
 class AIAnalysisRow(BisibilityModel):
     prompt: str
     model: str
+    engine: AIEngine | None = None
+    requested_model: str | None = None
+    actual_model: str | None = None
     answer: str
     observed_at: str | None
     brand_mentioned: bool
@@ -2724,7 +2822,10 @@ class AIAnalysisEstimate(BisibilityModel):
     credential_source: Literal["own", "hosted"] | None = None
     estimate_credentials_ref: str | None = None
     is_partial_estimate: bool | None = None
-    pricing_policy: Literal["legacy_dated", "current_catalog", "provider_actual_cost"] | None = None
+    pricing_policy: (
+        Literal["legacy_dated", "current_catalog", "provider_actual_cost", "measured_engines"]
+        | None
+    ) = None
     pricing_checked_at: str | None = None
     forecast_exclusions: list[str] | None = None
     forecast_scope: Literal["tokens_and_base_only"] | None = None

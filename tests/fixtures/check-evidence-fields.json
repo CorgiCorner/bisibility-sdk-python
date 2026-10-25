@@ -1,0 +1,68 @@
+{
+  "preferences": {
+    "alert_email": true,
+    "alert_in_app": true,
+    "alert_push": true,
+    "alert_slack": false,
+    "alert_webhook": false,
+    "check_email": false,
+    "check_in_app": true,
+    "check_notification_setting": "important",
+    "check_notification_top_n": 10,
+    "check_notification_position_move": 5,
+    "email": "owner@example.com",
+    "email_verification": "verified",
+    "import_email": true,
+    "import_in_app": true,
+    "invite_email": true,
+    "invite_in_app": true,
+    "project_id": "prj_a00000000000000000000000",
+    "report_email": true,
+    "slack_available": false,
+    "webhook_available": false,
+    "provider_incident_in_app": false
+  },
+  "check": {
+    "usage": {
+      "quantity": 3,
+      "status": "confirmed",
+      "unit": "operations"
+    },
+    "attempts": null,
+    "checked_at": "2026-09-05T12:00:00.000Z",
+    "cost_cents": 1.5,
+    "error": null,
+    "error_code": null,
+    "id": "check_a00000000000000000000000",
+    "keyword_id": "kw_a00000000000000000000000",
+    "observation_completeness": null,
+    "position": 3,
+    "previous_position": null,
+    "provider": "serpapi",
+    "ranking_url": null,
+    "run": null,
+    "run_id": null,
+    "status": "completed",
+    "evidence_projection": null
+  },
+  "projection": {
+    "acceptance": "accepted",
+    "fulfillment": "partial",
+    "returned_depth": null,
+    "accounting": null,
+    "result": "partial",
+    "cost": null,
+    "original_checked_at": null,
+    "recovery": {
+      "state": "pending",
+      "last_attempt_at": null,
+      "next_attempt_at": null,
+      "reason": "retained evidence"
+    }
+  },
+  "warning": {
+    "code": "deprecated_field",
+    "field": "check_in_app",
+    "message": "check_in_app is ignored; use check_notification_setting."
+  }
+}

@@ -1,4 +1,4 @@
-"""Public AI tracking contracts. Cost amounts retain decimal USD strings and unknowns."""
+"""Public Prompt Tracker contracts. Cost amounts retain decimal USD strings and unknowns."""
 
 from __future__ import annotations
 
@@ -6,13 +6,13 @@ from typing import Annotated, Any, Literal
 
 from pydantic import Field, SerializerFunctionWrapHandler, model_serializer
 
-from .ai_tracking_suggestions import (
-    AITrackingAcceptedDraft,
-    AITrackingGenerationReference,
-    AITrackingProviderDatasetReference,
-    AITrackingSuggestionReviewSnapshot,
-)
 from .models import BisibilityModel
+from .prompt_research_suggestions import (
+    PromptResearchAcceptedDraft,
+    PromptResearchGenerationReference,
+    PromptResearchProviderDatasetReference,
+    PromptResearchSuggestionReviewSnapshot,
+)
 
 TopicId = Annotated[str, Field(pattern=r"^ait_[a-z][a-z0-9]{23}$")]
 PromptId = Annotated[str, Field(pattern=r"^aip_[a-z][a-z0-9]{23}$")]
@@ -25,7 +25,7 @@ RunState = Literal[
 ]
 
 
-class AITrackingSourceConfiguration(BisibilityModel):
+class PromptTrackerSourceConfiguration(BisibilityModel):
     provider: Literal["dataforseo"]
     endpoint: str = Field(min_length=1, max_length=256)
     engine: Literal["chat_gpt", "gemini", "claude", "perplexity", "google"]
@@ -52,19 +52,19 @@ class AITrackingSourceConfiguration(BisibilityModel):
         return data
 
 
-class AITrackingTopicInput(BisibilityModel):
+class PromptTrackerTopicInput(BisibilityModel):
     paused: bool | None = None
     name: str = Field(min_length=1, max_length=200)
     description: str | None = Field(default=None, max_length=4000)
 
 
-class AITrackingTopicPatch(BisibilityModel):
+class PromptTrackerTopicPatch(BisibilityModel):
     paused: bool | None = None
     name: str | None = Field(default=None, min_length=1, max_length=200)
     description: str | None = Field(default=None, max_length=4000)
 
 
-class AITrackingTopic(AITrackingTopicInput):
+class PromptTrackerTopic(PromptTrackerTopicInput):
     paused_at: str | None
     id: TopicId
     archived_at: str | None
@@ -72,9 +72,9 @@ class AITrackingTopic(AITrackingTopicInput):
     updated_at: str
 
 
-class AITrackingPromptInput(BisibilityModel):
-    generation_reference: AITrackingGenerationReference | None = None
-    provider_dataset_reference: AITrackingProviderDatasetReference | None = None
+class PromptTrackerPromptInput(BisibilityModel):
+    generation_reference: PromptResearchGenerationReference | None = None
+    provider_dataset_reference: PromptResearchProviderDatasetReference | None = None
     text: str = Field(min_length=1, max_length=64000)
     topic_id: TopicId | None = None
     label: str | None = Field(default=None, max_length=200)
@@ -82,9 +82,9 @@ class AITrackingPromptInput(BisibilityModel):
     paused: bool | None = None
 
 
-class AITrackingPromptPatch(BisibilityModel):
-    generation_reference: AITrackingGenerationReference | None = None
-    provider_dataset_reference: AITrackingProviderDatasetReference | None = None
+class PromptTrackerPromptPatch(BisibilityModel):
+    generation_reference: PromptResearchGenerationReference | None = None
+    provider_dataset_reference: PromptResearchProviderDatasetReference | None = None
     text: str | None = Field(default=None, min_length=1, max_length=64000)
     topic_id: TopicId | None = None
     label: str | None = Field(default=None, max_length=200)
@@ -92,9 +92,9 @@ class AITrackingPromptPatch(BisibilityModel):
     paused: bool | None = None
 
 
-class AITrackingPromptRevision(BisibilityModel):
-    generation_reference: AITrackingGenerationReference | None = None
-    provider_dataset_reference: AITrackingProviderDatasetReference | None = None
+class PromptTrackerPromptRevision(BisibilityModel):
+    generation_reference: PromptResearchGenerationReference | None = None
+    provider_dataset_reference: PromptResearchProviderDatasetReference | None = None
     id: Annotated[str, Field(pattern=r"^apr_[a-z][a-z0-9]{23}$")]
     ordinal: int
     category: Literal["neutral", "comparative", "branded"]
@@ -103,8 +103,8 @@ class AITrackingPromptRevision(BisibilityModel):
     created_at: str
 
 
-class AITrackingPrompt(BisibilityModel):
-    revisions: list[AITrackingPromptRevision]
+class PromptTrackerPrompt(BisibilityModel):
+    revisions: list[PromptTrackerPromptRevision]
     paused_at: str | None
     id: PromptId
     topic_id: TopicId | None
@@ -114,14 +114,14 @@ class AITrackingPrompt(BisibilityModel):
     updated_at: str
 
 
-class AITrackingPreviewInput(BisibilityModel):
+class PromptTrackerPreviewInput(BisibilityModel):
     prompt_ids: list[PromptId] = Field(min_length=1, max_length=100)
-    configurations: list[AITrackingSourceConfiguration] = Field(min_length=1, max_length=20)
+    configurations: list[PromptTrackerSourceConfiguration] = Field(min_length=1, max_length=20)
     credential_connection_id: ConnectionId | None = None
 
 
-class AITrackingPreview(BisibilityModel):
-    configurations: list[AITrackingSourceConfiguration]
+class PromptTrackerPreview(BisibilityModel):
+    configurations: list[PromptTrackerSourceConfiguration]
     credential_connection_id: ConnectionId
     credential_version: str
     budget_revision: str
@@ -129,7 +129,7 @@ class AITrackingPreview(BisibilityModel):
     estimated_cost_cents: float
 
 
-class AITrackingRunInput(AITrackingPreviewInput):
+class PromptTrackerRunInput(PromptTrackerPreviewInput):
     credential_connection_id: ConnectionId
     credential_version: str
     budget_revision: str
@@ -142,12 +142,12 @@ class AITrackingRunInput(AITrackingPreviewInput):
     planned_at: str | None = None
 
 
-class AITrackingScheduleInput(BisibilityModel):
+class PromptTrackerScheduleInput(BisibilityModel):
     name: str = Field(min_length=1, max_length=200)
     cron: str = Field(min_length=1, max_length=200)
     timezone: str = Field(min_length=1, max_length=100)
     enabled: bool = False
-    configuration: AITrackingRunInput
+    configuration: PromptTrackerRunInput
     next_run_at: str | None = None
     # The API reads consent from the top level of the schedule payload when a
     # reviewed configuration must be re-approved on create or update, so expose
@@ -155,8 +155,8 @@ class AITrackingScheduleInput(BisibilityModel):
     consent: Literal[True] | None = None
 
 
-class AITrackingSchedulePatch(BisibilityModel):
-    """Partial update for an AI tracking schedule.
+class PromptTrackerSchedulePatch(BisibilityModel):
+    """Partial update for a Prompt Tracker schedule.
 
     Mirrors the API's ``scheduleInputSchema.partial()`` so none of the create
     fields are required. ``consent`` lives at the top level because the API
@@ -168,30 +168,30 @@ class AITrackingSchedulePatch(BisibilityModel):
     cron: str | None = Field(default=None, min_length=1, max_length=200)
     timezone: str | None = Field(default=None, min_length=1, max_length=100)
     enabled: bool | None = None
-    configuration: AITrackingRunInput | None = None
+    configuration: PromptTrackerRunInput | None = None
     next_run_at: str | None = None
     consent: Literal[True] | None = None
 
 
-class AITrackingScheduleConfiguration(BisibilityModel):
+class PromptTrackerScheduleConfiguration(BisibilityModel):
     prompt_ids: list[PromptId]
-    configurations: list[AITrackingSourceConfiguration]
+    configurations: list[PromptTrackerSourceConfiguration]
 
 
-class AITrackingSchedule(BisibilityModel):
+class PromptTrackerSchedule(BisibilityModel):
     name: str
     cron: str
     timezone: str
     enabled: bool
     next_run_at: str | None
-    configuration: AITrackingScheduleConfiguration
+    configuration: PromptTrackerScheduleConfiguration
     id: ScheduleId
     archived_at: str | None
     created_at: str
     updated_at: str
 
 
-class AITrackingRun(BisibilityModel):
+class PromptTrackerRun(BisibilityModel):
     id: RunId
     state: RunState
     created_at: str
@@ -201,7 +201,7 @@ class AITrackingRun(BisibilityModel):
     sample_count: int | None
 
 
-class AITrackingEvidence(BisibilityModel):
+class PromptTrackerEvidence(BisibilityModel):
     answer_text: str | None
     raw: Any
     answer_truncated: bool
@@ -218,7 +218,7 @@ class AITrackingEvidence(BisibilityModel):
     recorded_source: Literal["fresh", "cache"]
 
 
-class AITrackingSample(BisibilityModel):
+class PromptTrackerSample(BisibilityModel):
     id: SampleId
     measurement: Literal[
         "answer_present", "aio_not_present", "partial", "unavailable", "failed", "unknown"
@@ -227,38 +227,38 @@ class AITrackingSample(BisibilityModel):
     engine: Literal["chat_gpt", "gemini", "claude", "perplexity", "google"]
     prompt: str
     prompt_revision_id: Annotated[str, Field(pattern=r"^apr_[a-z][a-z0-9]{23}$")]
-    evidence: AITrackingEvidence | None
+    evidence: PromptTrackerEvidence | None
     citations: list[dict[str, Any]]
     cost_usd: str | None
     cost_state: Literal["unknown", "pending", "confirmed", "refund_pending", "derived"]
 
 
-class AITrackingExportScope(BisibilityModel):
+class PromptTrackerExportScope(BisibilityModel):
     complete: bool
     max_pages: int
     loaded: int
     resumed: bool
 
 
-class AITrackingExport(BisibilityModel):
-    items: list[AITrackingSample]
+class PromptTrackerExport(BisibilityModel):
+    items: list[PromptTrackerSample]
     run_id: RunId
     next_cursor: str | None
-    scope: AITrackingExportScope | None = None
+    scope: PromptTrackerExportScope | None = None
 
 
-class AITrackingEvidenceOptions(BisibilityModel):
+class PromptTrackerEvidenceOptions(BisibilityModel):
     format: Literal["json", "csv"] | None = None
     run_id: RunId
     limit: int | None = Field(default=None, ge=1, le=100)
     cursor: str | None = Field(default=None, max_length=512)
 
 
-class AITrackingTrendOptions(AITrackingEvidenceOptions):
+class PromptTrackerTrendOptions(PromptTrackerEvidenceOptions):
     previous_run_id: RunId | None = None
 
 
-class AITrackingDenominator(BisibilityModel):
+class PromptTrackerDenominator(BisibilityModel):
     expected: int
     observed: int
     eligible: int
@@ -272,28 +272,28 @@ class AITrackingDenominator(BisibilityModel):
     mention_rate: float | None
 
 
-class AITrackingTrendStratum(BisibilityModel):
-    """One per-category trend bucket inside :class:`AITrackingTrends`.
+class PromptTrackerTrendStratum(BisibilityModel):
+    """One per-category trend bucket inside :class:`PromptTrackerTrends`.
 
     The API ships this closed shape with every category it tracks so clients
     can read branded, comparative, neutral, and unknown trends side by side.
     """
 
     category: Literal["neutral", "comparative", "branded", "unknown"]
-    current: AITrackingDenominator
-    previous: AITrackingDenominator
+    current: PromptTrackerDenominator
+    previous: PromptTrackerDenominator
     comparable: bool
     reason: str | None
     delta: float | None
 
 
-class AITrackingTrends(BisibilityModel):
+class PromptTrackerTrends(BisibilityModel):
     comparable: bool
     reason: str | None
     current_run_id: RunId
     previous_run_id: RunId | None = None
-    previous: AITrackingDenominator | None = None
-    current: AITrackingDenominator
+    previous: PromptTrackerDenominator | None = None
+    current: PromptTrackerDenominator
     delta: float | None
     next_cursor: str | None
     previous_next_cursor: str | None = None
@@ -304,12 +304,12 @@ class AITrackingTrends(BisibilityModel):
     # include a previous run; keep them optional so single-run neutral
     # baselines remain parseable without inventing fields.
     category: Literal["neutral"] | None = None
-    strata: list[AITrackingTrendStratum] | None = None
+    strata: list[PromptTrackerTrendStratum] | None = None
 
 
-class AITrackingSuggestion(BisibilityModel):
-    generation_reference: AITrackingGenerationReference | None = None
-    provider_dataset_reference: AITrackingProviderDatasetReference | None = None
+class PromptResearchSuggestion(BisibilityModel):
+    generation_reference: PromptResearchGenerationReference | None = None
+    provider_dataset_reference: PromptResearchProviderDatasetReference | None = None
     text: str = Field(min_length=3, max_length=4000)
     category: Literal["neutral", "comparative", "branded"]
     provenance: Literal["generated_hypothesis", "provider_dataset", "model_generated_hypothesis"]
@@ -318,9 +318,9 @@ class AITrackingSuggestion(BisibilityModel):
     accepted: Literal[False]
 
 
-class AITrackingSuggestions(BisibilityModel):
-    input_snapshot: AITrackingSuggestionReviewSnapshot | None = None
-    drafts: list[AITrackingSuggestion]
+class PromptResearchSuggestions(BisibilityModel):
+    input_snapshot: PromptResearchSuggestionReviewSnapshot | None = None
+    drafts: list[PromptResearchSuggestion]
     method: Literal["context_template_heuristic", "manual_fallback"]
     context_updated_at: str | None
     requires_acceptance: bool
@@ -328,9 +328,9 @@ class AITrackingSuggestions(BisibilityModel):
     limitations: list[str]
 
 
-class AITrackingAcceptanceInput(BisibilityModel):
-    drafts: list[AITrackingAcceptedDraft] = Field(min_length=1, max_length=20)
+class PromptResearchAcceptanceInput(BisibilityModel):
+    drafts: list[PromptResearchAcceptedDraft] = Field(min_length=1, max_length=20)
 
 
-class AITrackingAcceptance(BisibilityModel):
-    prompts: list[AITrackingPrompt]
+class PromptResearchAcceptance(BisibilityModel):
+    prompts: list[PromptTrackerPrompt]

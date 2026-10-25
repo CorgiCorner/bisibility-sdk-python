@@ -1,0 +1,500 @@
+[
+  {
+    "operationId": "listSearchIndexSitemaps",
+    "method": "GET",
+    "path": "/projects/{project_id}/search-index/sitemaps",
+    "status": 404,
+    "body": {
+      "detail": "No connected Search Console property is available for this project.",
+      "docs_url": "https://api.example.com/docs/api/errors#not_found",
+      "instance": "urn:bisibility:api:v1:/api/v1/projects/prj_000000000000000000000000/search-index/sitemaps",
+      "status": 404,
+      "title": "Not found",
+      "type": "https://api.example.com/problems/not_found"
+    }
+  },
+  {
+    "operationId": "inspectSearchIndexUrls",
+    "method": "POST",
+    "path": "/projects/{project_id}/search-index/inspections",
+    "status": 400,
+    "body": {
+      "detail": "Request input failed validation.",
+      "docs_url": "https://api.example.com/docs/api/errors#validation_failed",
+      "instance": "urn:bisibility:api:v1:/api/v1/projects/prj_000000000000000000000000/search-index/inspections",
+      "status": 400,
+      "title": "Validation failed",
+      "type": "https://api.example.com/problems/validation_failed",
+      "errors": {
+        "formErrors": [],
+        "fieldErrors": {
+          "urls": [
+            "Invalid input: expected array, received string",
+            "Too big: expected string to have <=10 characters"
+          ]
+        }
+      }
+    }
+  },
+  {
+    "operationId": "inspectSearchIndexUrls",
+    "method": "POST",
+    "path": "/projects/{project_id}/search-index/inspections",
+    "status": 400,
+    "body": {
+      "detail": "URL must be a valid HTTP(S) URL within the project's connected Search Console property.",
+      "docs_url": "https://api.example.com/docs/api/errors#validation_failed",
+      "instance": "urn:bisibility:api:v1:/api/v1/projects/prj_000000000000000000000000/search-index/inspections",
+      "status": 400,
+      "title": "Validation failed",
+      "type": "https://api.example.com/problems/validation_failed",
+      "details": {
+        "code": "url_outside_property"
+      }
+    }
+  },
+  {
+    "operationId": "listSearchIndexSitemaps",
+    "method": "GET",
+    "path": "/projects/{project_id}/search-index/sitemaps",
+    "status": 400,
+    "body": {
+      "detail": "URL must be a valid HTTP(S) URL within the project's connected Search Console property.",
+      "docs_url": "https://api.example.com/docs/api/errors#validation_failed",
+      "instance": "urn:bisibility:api:v1:/api/v1/projects/prj_000000000000000000000000/search-index/sitemaps",
+      "status": 400,
+      "title": "Validation failed",
+      "type": "https://api.example.com/problems/validation_failed",
+      "details": {
+        "code": "url_outside_property"
+      }
+    }
+  },
+  {
+    "operationId": "getSearchIndexSitemap",
+    "method": "GET",
+    "path": "/projects/{project_id}/search-index/sitemaps/{path}",
+    "status": 400,
+    "body": {
+      "detail": "URL must be a valid HTTP(S) URL within the project's connected Search Console property.",
+      "docs_url": "https://api.example.com/docs/api/errors#validation_failed",
+      "instance": "urn:bisibility:api:v1:/api/v1/projects/prj_000000000000000000000000/search-index/sitemaps/https%3A%2F%2Fexample.org%2Fsitemap.xml",
+      "status": 400,
+      "title": "Validation failed",
+      "type": "https://api.example.com/problems/validation_failed",
+      "details": {
+        "code": "url_outside_property"
+      }
+    }
+  },
+  {
+    "operationId": "inspectSearchIndexUrls",
+    "method": "POST",
+    "path": "/projects/{project_id}/search-index/inspections",
+    "status": 200,
+    "body": {
+      "property": "https://example.com/blog/",
+      "results": [
+        {
+          "url": "https://example.com/blog/a",
+          "inspection": null,
+          "error": {
+            "code": "inspection_daily_limit",
+            "message": "Project daily inspection limit reached. No Google request was made for this URL."
+          }
+        }
+      ]
+    }
+  },
+  {
+    "operationId": "inspectSearchIndexUrls",
+    "method": "POST",
+    "path": "/projects/{project_id}/search-index/inspections",
+    "status": 200,
+    "body": {
+      "property": "https://example.com/blog/",
+      "results": [
+        {
+          "url": "https://example.com/blog/a",
+          "inspection": null,
+          "error": {
+            "code": "inspection_failed",
+            "message": "Inspection or result storage failed. Every URL sent to Google counts against the daily allowance, even when the call fails."
+          }
+        },
+        {
+          "url": "https://example.com/blog/b",
+          "inspection": {
+            "coverage_state": "Submitted and indexed",
+            "crawled_as": "MOBILE",
+            "google_canonical": "https://example.com/blog/page",
+            "indexing_state": "INDEXING_ALLOWED",
+            "inspection_result_link": "https://search.example.com/search-console/inspect?resource_id=sc-domain%3Aexample.com",
+            "last_crawl_at": "2026-10-23T01:00:00.000Z",
+            "last_crawl_time": "2026-10-23T01:00:00Z",
+            "page_fetch_state": "SUCCESSFUL",
+            "referring_urls": [
+              "https://example.com/"
+            ],
+            "rich_results_result": {
+              "verdict": "FAIL",
+              "detected_items": [
+                {
+                  "rich_result_type": "Product",
+                  "item_count": 2,
+                  "issue_count": 3,
+                  "issues": [
+                    {
+                      "severity": "ERROR",
+                      "count": 2
+                    },
+                    {
+                      "severity": "WARNING",
+                      "count": 1
+                    }
+                  ]
+                },
+                {
+                  "rich_result_type": "Breadcrumbs",
+                  "item_count": 1,
+                  "issue_count": 0,
+                  "issues": []
+                }
+              ]
+            },
+            "robots_txt_state": "ALLOWED",
+            "sitemap": [
+              "https://example.com/blog/sitemap.xml"
+            ],
+            "user_canonical": "https://example.com/blog/page",
+            "verdict": "PASS"
+          },
+          "error": null
+        }
+      ]
+    }
+  },
+  {
+    "operationId": "inspectSearchIndexUrls",
+    "method": "POST",
+    "path": "/projects/{project_id}/search-index/inspections",
+    "status": 200,
+    "body": {
+      "property": "https://example.com/blog/",
+      "results": [
+        {
+          "url": "https://example.com/blog/a",
+          "inspection": {
+            "coverage_state": "Submitted and indexed",
+            "crawled_as": "MOBILE",
+            "google_canonical": "https://example.com/blog/page",
+            "indexing_state": "INDEXING_ALLOWED",
+            "inspection_result_link": "https://search.example.com/search-console/inspect?resource_id=sc-domain%3Aexample.com",
+            "last_crawl_at": "2026-10-23T01:00:00.000Z",
+            "last_crawl_time": "2026-10-23T01:00:00Z",
+            "page_fetch_state": "SUCCESSFUL",
+            "referring_urls": [
+              "https://example.com/"
+            ],
+            "rich_results_result": {
+              "verdict": "FAIL",
+              "detected_items": [
+                {
+                  "rich_result_type": "Product",
+                  "item_count": 2,
+                  "issue_count": 3,
+                  "issues": [
+                    {
+                      "severity": "ERROR",
+                      "count": 2
+                    },
+                    {
+                      "severity": "WARNING",
+                      "count": 1
+                    }
+                  ]
+                },
+                {
+                  "rich_result_type": "Breadcrumbs",
+                  "item_count": 1,
+                  "issue_count": 0,
+                  "issues": []
+                }
+              ]
+            },
+            "robots_txt_state": "ALLOWED",
+            "sitemap": [
+              "https://example.com/blog/sitemap.xml"
+            ],
+            "user_canonical": "https://example.com/blog/page",
+            "verdict": "PASS"
+          },
+          "error": null
+        },
+        {
+          "url": "https://example.com/blog/b",
+          "inspection": {
+            "coverage_state": "Submitted and indexed",
+            "crawled_as": "MOBILE",
+            "google_canonical": "https://example.com/blog/page",
+            "indexing_state": "INDEXING_ALLOWED",
+            "inspection_result_link": "https://search.example.com/search-console/inspect?resource_id=sc-domain%3Aexample.com",
+            "last_crawl_at": "2026-10-23T01:00:00.000Z",
+            "last_crawl_time": "2026-10-23T01:00:00Z",
+            "page_fetch_state": "SUCCESSFUL",
+            "referring_urls": [
+              "https://example.com/"
+            ],
+            "rich_results_result": {
+              "verdict": "FAIL",
+              "detected_items": [
+                {
+                  "rich_result_type": "Product",
+                  "item_count": 2,
+                  "issue_count": 3,
+                  "issues": [
+                    {
+                      "severity": "ERROR",
+                      "count": 2
+                    },
+                    {
+                      "severity": "WARNING",
+                      "count": 1
+                    }
+                  ]
+                },
+                {
+                  "rich_result_type": "Breadcrumbs",
+                  "item_count": 1,
+                  "issue_count": 0,
+                  "issues": []
+                }
+              ]
+            },
+            "robots_txt_state": "ALLOWED",
+            "sitemap": [
+              "https://example.com/blog/sitemap.xml"
+            ],
+            "user_canonical": "https://example.com/blog/page",
+            "verdict": "PASS"
+          },
+          "error": null
+        }
+      ]
+    }
+  },
+  {
+    "operationId": "getSearchIndexSitemap",
+    "method": "GET",
+    "path": "/projects/{project_id}/search-index/sitemaps/{path}",
+    "status": 200,
+    "body": {
+      "property": "https://example.com/blog/",
+      "sitemap": {
+        "contents": [
+          {
+            "submitted": 42,
+            "type": "web"
+          }
+        ],
+        "errors": 2,
+        "is_pending": false,
+        "is_sitemaps_index": true,
+        "last_downloaded": "2026-10-23T01:00:00Z",
+        "last_submitted": "2026-10-23T00:00:00Z",
+        "path": "https://example.com/blog/sitemap.xml",
+        "type": "sitemap",
+        "warnings": 3
+      }
+    }
+  },
+  {
+    "operationId": "listSearchIndexSitemaps",
+    "method": "GET",
+    "path": "/projects/{project_id}/search-index/sitemaps",
+    "status": 200,
+    "body": {
+      "property": "https://example.com/blog/",
+      "sitemaps": [
+        {
+          "contents": [
+            {
+              "submitted": 42,
+              "type": "web"
+            }
+          ],
+          "errors": 2,
+          "is_pending": false,
+          "is_sitemaps_index": true,
+          "last_downloaded": "2026-10-23T01:00:00Z",
+          "last_submitted": "2026-10-23T00:00:00Z",
+          "path": "https://example.com/blog/sitemap.xml",
+          "type": "sitemap",
+          "warnings": 3
+        }
+      ]
+    }
+  },
+  {
+    "operationId": "listSearchIndexSitemaps",
+    "method": "GET",
+    "path": "/projects/{project_id}/search-index/sitemaps",
+    "status": 422,
+    "body": {
+      "detail": "Search Console denied access to this property; check that the connected account can access it.",
+      "docs_url": "https://api.example.com/docs/api/errors#provider_unavailable",
+      "instance": "urn:bisibility:api:v1:/api/v1/projects/prj_000000000000000000000000/search-index/sitemaps",
+      "status": 422,
+      "title": "Provider unavailable",
+      "type": "https://api.example.com/problems/provider_unavailable"
+    }
+  },
+  {
+    "operationId": "listSearchIndexSitemaps",
+    "method": "GET",
+    "path": "/projects/{project_id}/search-index/sitemaps",
+    "status": 404,
+    "body": {
+      "detail": "Search Console property not found.",
+      "docs_url": "https://api.example.com/docs/api/errors#not_found",
+      "instance": "urn:bisibility:api:v1:/api/v1/projects/prj_000000000000000000000000/search-index/sitemaps",
+      "status": 404,
+      "title": "Not found",
+      "type": "https://api.example.com/problems/not_found"
+    }
+  },
+  {
+    "operationId": "getSearchIndexSitemap",
+    "method": "GET",
+    "path": "/projects/{project_id}/search-index/sitemaps/{path}",
+    "status": 404,
+    "body": {
+      "detail": "Sitemap not found in Search Console for this property.",
+      "docs_url": "https://api.example.com/docs/api/errors#not_found",
+      "instance": "urn:bisibility:api:v1:/api/v1/projects/prj_000000000000000000000000/search-index/sitemaps/https%3A%2F%2Fexample.com%2Fblog%2Fsitemap.xml",
+      "status": 404,
+      "title": "Not found",
+      "type": "https://api.example.com/problems/not_found"
+    }
+  },
+  {
+    "operationId": "inspectSearchIndexUrls",
+    "method": "POST",
+    "path": "/projects/{project_id}/search-index/inspections",
+    "status": 200,
+    "body": {
+      "property": "https://example.com/blog/",
+      "results": [
+        {
+          "url": "https://example.com/blog/a",
+          "inspection": null,
+          "error": {
+            "code": "inspection_failed",
+            "message": "Inspection or result storage failed. Every URL sent to Google counts against the daily allowance, even when the call fails."
+          }
+        }
+      ]
+    }
+  },
+  {
+    "operationId": "inspectSearchIndexUrls",
+    "method": "POST",
+    "path": "/projects/{project_id}/search-index/inspections",
+    "status": 200,
+    "body": {
+      "property": "https://example.com/blog/",
+      "results": [
+        {
+          "url": "https://example.com/blog/a",
+          "inspection": null,
+          "error": {
+            "code": "provider_rate_limited",
+            "message": "Search Console rate limit reached; no further URLs in this request were sent.",
+            "reset_at": "2026-10-25T00:00:00.000Z",
+            "scope": "daily"
+          }
+        },
+        {
+          "url": "https://example.com/blog/b",
+          "inspection": null,
+          "error": {
+            "code": "provider_rate_limited",
+            "message": "Search Console rate limit reached; no further URLs in this request were sent.",
+            "reset_at": "2026-10-25T00:00:00.000Z",
+            "scope": "daily"
+          }
+        },
+        {
+          "url": "https://example.com/blog/c",
+          "inspection": null,
+          "error": {
+            "code": "provider_rate_limited",
+            "message": "Search Console rate limit reached; no further URLs in this request were sent.",
+            "reset_at": "2026-10-25T00:00:00.000Z",
+            "scope": "daily"
+          }
+        }
+      ]
+    }
+  },
+  {
+    "operationId": "inspectSearchIndexUrls",
+    "method": "POST",
+    "path": "/projects/{project_id}/search-index/inspections",
+    "status": 200,
+    "body": {
+      "property": "sc-domain:example.com",
+      "results": [
+        {
+          "url": "https://example.com/",
+          "inspection": {
+            "coverage_state": "Submitted and indexed",
+            "crawled_as": "MOBILE",
+            "google_canonical": "https://example.com/blog/page",
+            "indexing_state": "INDEXING_ALLOWED",
+            "inspection_result_link": "https://search.example.com/search-console/inspect?resource_id=sc-domain%3Aexample.com",
+            "last_crawl_at": "2026-10-23T01:00:00.000Z",
+            "last_crawl_time": "2026-10-23T01:00:00Z",
+            "page_fetch_state": "SUCCESSFUL",
+            "referring_urls": [
+              "https://example.com/"
+            ],
+            "rich_results_result": {
+              "verdict": "FAIL",
+              "detected_items": [
+                {
+                  "rich_result_type": "Product",
+                  "item_count": 2,
+                  "issue_count": 3,
+                  "issues": [
+                    {
+                      "severity": "ERROR",
+                      "count": 2
+                    },
+                    {
+                      "severity": "WARNING",
+                      "count": 1
+                    }
+                  ]
+                },
+                {
+                  "rich_result_type": "Breadcrumbs",
+                  "item_count": 1,
+                  "issue_count": 0,
+                  "issues": []
+                }
+              ]
+            },
+            "robots_txt_state": "ALLOWED",
+            "sitemap": [
+              "https://example.com/blog/sitemap.xml"
+            ],
+            "user_canonical": "https://example.com/blog/page",
+            "verdict": "PASS"
+          },
+          "error": null
+        }
+      ]
+    }
+  }
+]
