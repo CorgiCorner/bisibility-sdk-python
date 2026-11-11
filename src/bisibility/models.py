@@ -49,6 +49,7 @@ from .public_ids import (
     require_public_id,
 )
 from .rank_history_report import RankHistoryReportResponse as RankHistoryReportResponse
+from .saved_views import SavedViewDefinition
 
 JsonObject: TypeAlias = dict[str, Any]
 Device: TypeAlias = Literal["desktop", "mobile"]
@@ -93,6 +94,7 @@ ProviderId: TypeAlias = Literal[
     "gsc",
     "ga4",
     "plausible",
+    "pagespeed",
     "ahrefs",
     "semrush",
 ]
@@ -1481,6 +1483,7 @@ class ProviderDisconnectResult(BisibilityModel):
 
 
 class SavedViewFilters(BisibilityModel):
+    ai_overview_shown: StrictBool | None = None
     change: Literal["any", "up", "down", "new", "lost"] | None = None
     contains: str | None = None
     country: Literal["all", "us", "gb", "de", "pl"] | None = None
@@ -1507,6 +1510,11 @@ class CreateSavedViewInput(BisibilityModel):
 
 
 class SavedView(BisibilityModel):
+    definition: SavedViewDefinition | None = None
+    surface: Literal["keywords", "competitors"] | None = None
+    can_delete: bool | None = None
+    revision: int | None = None
+    visibility: str | None = None
     config: SavedViewConfig
     created_at: str
     created_by_id: UserId | None

@@ -20,6 +20,7 @@ PublicIdPrefix: TypeAlias = Literal[
     "check",
     "cmp",
     "conn",
+    "dpt",
     "dwh",
     "ferry",
     "imp",
@@ -52,6 +53,7 @@ PUBLIC_ID_PREFIXES: frozenset[PublicIdPrefix] = frozenset(
         "check",
         "cmp",
         "conn",
+        "dpt",
         "dwh",
         "ferry",
         "imp",
@@ -124,3 +126,5 @@ AgentReportId: TypeAlias = Annotated[str, Field(pattern=public_id_pattern("agr")
 LocalMonitorId: TypeAlias = Annotated[str, Field(pattern=public_id_pattern("lmn"))]
 LocalMonitorRunId: TypeAlias = Annotated[str, Field(pattern=public_id_pattern("lmr"))]
 LocalMeasurementTargetId: TypeAlias = Annotated[str, Field(pattern=public_id_pattern("lmt"))]
+
+DevicePushTokenId: TypeAlias = Annotated[str, Field(pattern=public_id_pattern("dpt"))]

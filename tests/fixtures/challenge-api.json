@@ -1,0 +1,291 @@
+{
+  "getDomainVerification": {
+    "data": {
+      "dns_host": "_bisibility.example.com",
+      "dns_value": "example",
+      "domain": "example.com",
+      "failures": 1,
+      "last_check_result": null,
+      "last_checked_at": null,
+      "method": "dns_txt",
+      "revoked_at": null,
+      "verified_at": null
+    }
+  },
+  "issueDomainVerification": {
+    "data": {
+      "dns_host": "_bisibility.example.com",
+      "dns_value": "example",
+      "domain": "example.com",
+      "failures": 1,
+      "last_check_result": null,
+      "last_checked_at": null,
+      "method": "dns_txt",
+      "revoked_at": null,
+      "verified_at": null
+    }
+  },
+  "checkDomainVerification": {
+    "data": {
+      "dns_host": "_bisibility.example.com",
+      "dns_value": "example",
+      "domain": "example.com",
+      "failures": 1,
+      "last_check_result": null,
+      "last_checked_at": null,
+      "method": "dns_txt",
+      "revoked_at": null,
+      "verified_at": null
+    }
+  },
+  "getSiteAuditRun": {
+    "data": {
+      "budget_pages": 1,
+      "completed_at": null,
+      "pages_crawled": 1,
+      "requests": 1,
+      "started_at": null,
+      "state": "queued",
+      "stop_reason": null
+    }
+  },
+  "cancelSiteAuditRun": {
+    "data": {
+      "budget_pages": 1,
+      "completed_at": null,
+      "pages_crawled": 1,
+      "requests": 1,
+      "started_at": null,
+      "state": "queued",
+      "stop_reason": null
+    }
+  },
+  "resumeSiteAuditRun": {
+    "data": {
+      "budget_pages": 1,
+      "completed_at": null,
+      "pages_crawled": 1,
+      "requests": 1,
+      "started_at": null,
+      "state": "queued",
+      "stop_reason": null
+    }
+  },
+  "listSiteAuditPages": {
+    "data": {
+      "next_offset": null,
+      "offset": 1,
+      "pages": [
+        {
+          "canonical": null,
+          "description": null,
+          "external_link_count": 1,
+          "final_url": "https://example.com",
+          "h1_count": 1,
+          "headings": [
+            {
+              "level": 1,
+              "text": "example"
+            }
+          ],
+          "image_count": 1,
+          "indexable": false,
+          "internal_link_count": 1,
+          "internal_links": [
+            "example"
+          ],
+          "issues": [
+            {
+              "code": "example",
+              "message": "example",
+              "severity": "error"
+            }
+          ],
+          "missing_alt_count": 1,
+          "response_time_ms": 1,
+          "robots": null,
+          "status": null,
+          "title": null,
+          "url": "https://example.com"
+        }
+      ]
+    }
+  },
+  "deleteMe": {
+    "deleted": true
+  },
+  "listDevicePushTokens": {
+    "data": [
+      {
+        "bundle_id": "example",
+        "created_at": "2026-11-11T12:00:00Z",
+        "environment": "production",
+        "id": "dpt_a00000000000000000000000",
+        "last_seen_at": "2026-11-11T12:00:00Z",
+        "token_suffix": "example"
+      }
+    ],
+    "meta": {
+      "next_cursor": null
+    }
+  },
+  "registerDevicePushToken": {
+    "bundle_id": "example",
+    "created_at": "2026-11-11T12:00:00Z",
+    "environment": "production",
+    "id": "dpt_a00000000000000000000000",
+    "last_seen_at": "2026-11-11T12:00:00Z",
+    "token_suffix": "example"
+  },
+  "deleteDevicePushToken": {
+    "bundle_id": "example",
+    "created_at": "2026-11-11T12:00:00Z",
+    "environment": "production",
+    "id": "dpt_a00000000000000000000000",
+    "last_seen_at": "2026-11-11T12:00:00Z",
+    "token_suffix": "example"
+  },
+  "getSearchPerformanceTotals": {
+    "current": {
+      "clicks": 1,
+      "ctr": 1,
+      "data_end_date": null,
+      "data_start_date": null,
+      "end_date": "2026-11-01",
+      "freshness": {
+        "data_state": "all",
+        "fetched_at": "2026-11-11T12:00:00Z",
+        "finalized_through": null,
+        "first_incomplete_date": null
+      },
+      "impressions": 1,
+      "position": 1,
+      "start_date": "2026-11-01"
+    },
+    "previous": null,
+    "property": "https://example.com",
+    "search_type": "web",
+    "source": "stored"
+  },
+  "savedV1": {
+    "can_delete": false,
+    "config": {
+      "filters": {
+        "ai_overview_shown": false
+      },
+      "search": "example"
+    },
+    "created_at": "2026-11-11T12:00:00Z",
+    "created_by_id": null,
+    "definition": {
+      "filters": {
+        "ai_overview_shown": false,
+        "change": "any",
+        "contains": "example",
+        "intents": [
+          "example"
+        ],
+        "last_check": "any",
+        "position": [
+          "top3"
+        ],
+        "serp": [
+          "featured"
+        ],
+        "tags": [
+          "example"
+        ],
+        "topics": [
+          "example"
+        ],
+        "url_changed": false,
+        "vol_max": 1,
+        "vol_min": 1,
+        "wrong_url": false
+      },
+      "lens": {
+        "device": "all",
+        "location_id": null
+      },
+      "search": "example",
+      "surface": "keywords",
+      "version": 1
+    },
+    "id": "viw_a00000000000000000000000",
+    "name": "example",
+    "revision": 1,
+    "surface": "keywords",
+    "visibility": "project"
+  },
+  "savedV2": {
+    "can_delete": false,
+    "config": {
+      "filters": {
+        "ai_overview_shown": false
+      },
+      "search": "example"
+    },
+    "created_at": "2026-11-11T12:00:00Z",
+    "created_by_id": null,
+    "definition": {
+      "filters": {
+        "ai_overview_shown": false,
+        "change": "any",
+        "contains": "example",
+        "intents": [
+          "example"
+        ],
+        "last_check": "any",
+        "position": [
+          "top3"
+        ],
+        "serp": [
+          "featured"
+        ],
+        "tags": [
+          "example"
+        ],
+        "topics": [
+          "example"
+        ],
+        "url_changed": false,
+        "vol_max": 1,
+        "vol_min": 1,
+        "wrong_url": false
+      },
+      "grouped": false,
+      "lens": {
+        "device": "all",
+        "location_id": null
+      },
+      "page_size": 25,
+      "presentation": {
+        "column_order": [
+          "example"
+        ],
+        "registry_version": 1,
+        "sizing": {},
+        "version": 1,
+        "visibility": {}
+      },
+      "report_scope": {
+        "as_of": null,
+        "comparison_days": 7,
+        "subject": null,
+        "view": "ai_overviews"
+      },
+      "search": "example",
+      "sort": {
+        "direction": "asc",
+        "field": "keyword"
+      },
+      "surface": "keywords",
+      "version": 2
+    },
+    "id": "viw_a00000000000000000000000",
+    "name": "example",
+    "revision": 1,
+    "surface": "keywords",
+    "visibility": "project"
+  }
+}

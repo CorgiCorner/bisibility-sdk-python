@@ -8,7 +8,7 @@
 > [API reference](https://bisibility.com/docs/api/overview) ·
 > [Roadmap](https://bisibility.com/roadmap)
 >
-> SDK version: **0.18.0**. Published versions are listed on [PyPI](https://pypi.org/project/bisibility/).
+> SDK version: **0.20.0**. Published versions are listed on [PyPI](https://pypi.org/project/bisibility/).
 
 Python SDK for the Bisibility REST API.
 
@@ -120,7 +120,7 @@ request. The same validation is applied to typed request bodies, project header,
 and ID-bearing API responses. A malformed success response raises
 `BisibilityResponseError`.
 
-The SDK registry is: `agr`, `al`, `alr`, `audit`, `check`, `cmp`, `conn`, `dwh`,
+The SDK registry is: `agr`, `al`, `alr`, `audit`, `check`, `cmp`, `conn`, `dpt`, `dwh`,
 `ferry`, `imp`, `inv`, `key`, `kw`, `mbr`, `ntf`, `pat`, `prj`, `rcr`, `sid`, `sig`,
 `svkw`, `tag`, `usr`, `viw`, and `we`. Import
 `PUBLIC_ID_PREFIXES` or `public_id_pattern()` when another component needs the
@@ -852,3 +852,30 @@ background inspections; explicit inspections still use the fixed allowance.
 use `available_modes` to read supported modes. Settings expose estimated usage,
 `last429_kind`, `last429_at` and `next_reset_at` at Pacific midnight. Shared property
 usage is also estimated because other tools consume Google quota.
+
+### Saved-view definitions and API additions
+
+`SavedView.definition` provides typed keyword and competitor definitions for versions
+1 and 2. Both keyword versions retain `filters.ai_overview_shown`, including explicit
+`False`; version 2 supports `report_scope.view="ai_overviews"`. Older responses may
+omit the definition or the filter, which defaults to `False`. Pass
+`{"config": {"filters": {"ai_overview_shown": False}}, "name": "Example"}` to
+`create_saved_view` to persist an explicit false filter. Normalized definitions are
+returned by both create and list operations.
+
+Provider methods accept `pagespeed` for connect, disconnect, test, settings, and budgets.
+`get_domain_verification`, `issue_domain_verification`, and `check_domain_verification`
+manage project-domain proofs; `data=None` means no proof exists.
+`get_site_audit_run`, `cancel_site_audit_run`, `resume_site_audit_run`, and
+`list_site_audit_pages` use project and `agr_` report IDs. Page reads accept offset
+0-100000 and limit 1-100; `next_offset=None` ends pagination. Reads do not start a crawl.
+
+`get_search_performance_totals` returns all-query web totals, freshness and an optional
+previous period for inclusive Pacific dates. `delete_me` requires the account email
+and server-enforced deletion authorization. `list_device_push_tokens`,
+`register_device_push_token`, and `delete_device_push_token` manage `dpt_` device
+registrations; responses contain only token suffixes. Every new method is available
+on both clients and accepts the existing `request_options`.
+
+`create_agent_report` accepts external report kinds; `prompt_research` and
+`challenge_report` are reserved producer kinds.

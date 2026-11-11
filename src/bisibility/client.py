@@ -26,6 +26,19 @@ from pydantic import BaseModel, TypeAdapter, ValidationError
 
 from .ai_catalog import AIResearchCatalog
 from .analytics_consent import AccountAnalyticsConsent, UpdateAnalyticsConsentInput
+from .api_additions import (
+    DeleteMeInput,
+    DevicePushToken,
+    DomainVerificationInput,
+    DomainVerificationResponse,
+    ListSiteAuditPagesOptions,
+    MeDeleted,
+    RegisterDevicePushTokenInput,
+    SearchPerformanceTotalsOptions,
+    SearchPerformanceTotalsResponse,
+    SiteAuditPageList,
+    SiteAuditRunProgress,
+)
 from .defaults_review import (
     ProjectDefaultsPreview,
     assert_defaults_support,
@@ -264,7 +277,7 @@ _MISSING = object()
 try:
     SDK_VERSION = version("bisibility")
 except PackageNotFoundError:  # pragma: no cover - source tree without installed metadata
-    SDK_VERSION = "0.19.0"
+    SDK_VERSION = "0.20.0"
 CLIENT_ID = f"bisibility-sdk-python/{SDK_VERSION}"
 AUTH_TOKEN_PREFIXES = ("bsb_key_live_", "bsb_key_test_", "bsb_pat_live_", "mig_")
 
@@ -573,6 +586,41 @@ class BisibilityClient:
     def __exit__(self, exc_type: object, exc_value: object, traceback: object) -> None:
         self.close()
 
+    def get_domain_verification(
+        self, project_id: str, request_options: RequestOptionsLike = None
+    ) -> DomainVerificationResponse:
+        """Read the current proof, or None in data when no proof exists."""
+        return self._request(
+            "GET",
+            f"/projects/{_encoded_path_segment(project_id, 'prj')}/domain-verification",
+            response_model=DomainVerificationResponse,
+            request_options=request_options,
+        )
+
+    def issue_domain_verification(
+        self,
+        project_id: str,
+        input: DomainVerificationInput | Mapping[str, Any],
+        request_options: RequestOptionsLike = None,
+    ) -> DomainVerificationResponse:
+        return self._request(
+            "POST",
+            f"/projects/{_encoded_path_segment(project_id, 'prj')}/domain-verification",
+            body=_dump_body(input, DomainVerificationInput),
+            response_model=DomainVerificationResponse,
+            request_options=request_options,
+        )
+
+    def check_domain_verification(
+        self, project_id: str, request_options: RequestOptionsLike = None
+    ) -> DomainVerificationResponse:
+        return self._request(
+            "POST",
+            f"/projects/{_encoded_path_segment(project_id, 'prj')}/domain-verification/check",
+            response_model=DomainVerificationResponse,
+            request_options=request_options,
+        )
+
     def get_project_context(
         self, project_id: str, request_options: RequestOptionsLike = None
     ) -> DataResponse[ProjectContext]:
@@ -617,6 +665,7 @@ class BisibilityClient:
         input: CreateAgentReportInput | Mapping[str, Any],
         request_options: RequestOptionsLike = None,
     ) -> DataResponse[AgentReportResource]:
+        """Save external analysis; prompt_research and challenge_report are reserved kinds."""
         return self._request(
             "POST",
             f"/projects/{_encoded_path_segment(project_id, 'prj')}/agent-reports",
@@ -672,6 +721,63 @@ class BisibilityClient:
                 f"{_encoded_path_segment(report_id, 'agr')}"
             ),
             response_model=DataResponse[SiteAuditReport],
+            request_options=request_options,
+        )
+
+    def get_site_audit_run(
+        self, project_id: str, report_id: str, request_options: RequestOptionsLike = None
+    ) -> DataResponse[SiteAuditRunProgress]:
+        return self._request(
+            "GET",
+            (
+                f"/projects/{_encoded_path_segment(project_id, 'prj')}/site-audits/"
+                f"{_encoded_path_segment(report_id, 'agr')}/run"
+            ),
+            response_model=DataResponse[SiteAuditRunProgress],
+            request_options=request_options,
+        )
+
+    def cancel_site_audit_run(
+        self, project_id: str, report_id: str, request_options: RequestOptionsLike = None
+    ) -> DataResponse[SiteAuditRunProgress]:
+        return self._request(
+            "POST",
+            (
+                f"/projects/{_encoded_path_segment(project_id, 'prj')}/site-audits/"
+                f"{_encoded_path_segment(report_id, 'agr')}/cancel"
+            ),
+            response_model=DataResponse[SiteAuditRunProgress],
+            request_options=request_options,
+        )
+
+    def resume_site_audit_run(
+        self, project_id: str, report_id: str, request_options: RequestOptionsLike = None
+    ) -> DataResponse[SiteAuditRunProgress]:
+        return self._request(
+            "POST",
+            (
+                f"/projects/{_encoded_path_segment(project_id, 'prj')}/site-audits/"
+                f"{_encoded_path_segment(report_id, 'agr')}/resume"
+            ),
+            response_model=DataResponse[SiteAuditRunProgress],
+            request_options=request_options,
+        )
+
+    def list_site_audit_pages(
+        self,
+        project_id: str,
+        report_id: str,
+        options: ListSiteAuditPagesOptions | Mapping[str, Any] | None = None,
+        request_options: RequestOptionsLike = None,
+    ) -> DataResponse[SiteAuditPageList]:
+        return self._request(
+            "GET",
+            (
+                f"/projects/{_encoded_path_segment(project_id, 'prj')}/site-audits/"
+                f"{_encoded_path_segment(report_id, 'agr')}/pages"
+            ),
+            query=_dump_options(options, ListSiteAuditPagesOptions),
+            response_model=DataResponse[SiteAuditPageList],
             request_options=request_options,
         )
 
@@ -1283,6 +1389,51 @@ class BisibilityClient:
             "/me/analytics-consent",
             body=_dump_body(input, UpdateAnalyticsConsentInput),
             response_model=AccountAnalyticsConsent,
+            request_options=request_options,
+        )
+
+    def delete_me(
+        self, input: DeleteMeInput | Mapping[str, Any], request_options: RequestOptionsLike = None
+    ) -> MeDeleted:
+        """Permanently delete the account after server authorization and email confirmation."""
+        return self._request(
+            "DELETE",
+            "/me",
+            body=_dump_body(input, DeleteMeInput),
+            response_model=MeDeleted,
+            request_options=request_options,
+        )
+
+    def list_device_push_tokens(
+        self, request_options: RequestOptionsLike = None
+    ) -> ListResponse[DevicePushToken]:
+        return self._request(
+            "GET",
+            "/me/push-tokens",
+            response_model=ListResponse[DevicePushToken],
+            request_options=request_options,
+        )
+
+    def register_device_push_token(
+        self,
+        input: RegisterDevicePushTokenInput | Mapping[str, Any],
+        request_options: RequestOptionsLike = None,
+    ) -> DevicePushToken:
+        return self._request(
+            "POST",
+            "/me/push-tokens",
+            body=_dump_body(input, RegisterDevicePushTokenInput),
+            response_model=DevicePushToken,
+            request_options=request_options,
+        )
+
+    def delete_device_push_token(
+        self, push_token_id: str, request_options: RequestOptionsLike = None
+    ) -> DevicePushToken:
+        return self._request(
+            "DELETE",
+            f"/me/push-tokens/{_encoded_path_segment(push_token_id, 'dpt')}",
+            response_model=DevicePushToken,
             request_options=request_options,
         )
 
@@ -2153,6 +2304,21 @@ class BisibilityClient:
                 "start_date": filters.get("start_date"),
             },
             response_model=PageTrafficSnapshotsResponse,
+            request_options=request_options,
+        )
+
+    def get_search_performance_totals(
+        self,
+        project_id: str,
+        options: SearchPerformanceTotalsOptions | Mapping[str, Any],
+        request_options: RequestOptionsLike = None,
+    ) -> SearchPerformanceTotalsResponse:
+        """Read all-query web totals for inclusive Pacific dates without starting an import."""
+        return self._request(
+            "GET",
+            f"/projects/{_encoded_path_segment(project_id, 'prj')}/analytics/totals",
+            query=_dump_options(options, SearchPerformanceTotalsOptions),
+            response_model=SearchPerformanceTotalsResponse,
             request_options=request_options,
         )
 

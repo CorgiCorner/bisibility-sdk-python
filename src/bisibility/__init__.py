@@ -1,5 +1,23 @@
 from .ai_catalog import AIResearchCatalog
 from .analytics_consent import AccountAnalyticsConsent, UpdateAnalyticsConsentInput
+from .api_additions import (
+    DeleteMeInput,
+    DevicePushEnvironment,
+    DevicePushToken,
+    DomainVerification,
+    DomainVerificationInput,
+    DomainVerificationMethod,
+    DomainVerificationResponse,
+    ListSiteAuditPagesOptions,
+    MeDeleted,
+    RegisterDevicePushTokenInput,
+    SearchPerformanceFreshness,
+    SearchPerformancePeriod,
+    SearchPerformanceTotalsOptions,
+    SearchPerformanceTotalsResponse,
+    SiteAuditPageList,
+    SiteAuditRunProgress,
+)
 from .async_client import AsyncBisibilityClient, create_async_bisibility_client
 from .client import BisibilityClient, RequestOptions, create_bisibility_client
 from .defaults_review import ProjectDefaultsPreview, ProjectDefaultsReview
@@ -403,13 +421,36 @@ from .provider_evidence import (
     RankCheckRunEvidenceProjection,
     ResultCompleteness,
 )
-from .public_ids import PUBLIC_ID_PREFIXES, PublicIdPrefix, public_id_pattern, require_public_id
+from .public_ids import (
+    PUBLIC_ID_PREFIXES,
+    DevicePushTokenId,
+    PublicIdPrefix,
+    public_id_pattern,
+    require_public_id,
+)
 from .rank_check_runs import (
     ListRankCheckRunsOptions,
     RankCheckRunCounts,
     RankCheckRunNativeEstimate,
     RankCheckRunRead,
     RankCheckRunUsage,
+)
+from .saved_views import (
+    CompetitorSavedViewDefinitionV1,
+    CompetitorSavedViewDefinitionV2,
+    CompetitorSavedViewFilters,
+    CompetitorSavedViewScope,
+    KeywordSavedViewDefinitionV1,
+    KeywordSavedViewDefinitionV2,
+    KeywordSavedViewFilters,
+    SavedViewDefinition,
+    SavedViewLens,
+    SavedViewPresentation,
+    SavedViewReportScope,
+    SavedViewReportSubject,
+    SavedViewReportView,
+    SavedViewSort,
+    SavedViewSubjectScope,
 )
 from .search_index import (
     SearchIndexDetectedItem,
@@ -851,4 +892,39 @@ __all__ += [
     "LocalMonitorRunHistoryResponse",
     "LocalMonitorRunId",
     "LocalMonitorRunResultResponse",
+]
+
+__all__ += [
+    "CompetitorSavedViewDefinitionV1",
+    "CompetitorSavedViewDefinitionV2",
+    "CompetitorSavedViewFilters",
+    "CompetitorSavedViewScope",
+    "DeleteMeInput",
+    "DevicePushEnvironment",
+    "DevicePushToken",
+    "DevicePushTokenId",
+    "DomainVerification",
+    "DomainVerificationInput",
+    "DomainVerificationMethod",
+    "DomainVerificationResponse",
+    "KeywordSavedViewDefinitionV1",
+    "KeywordSavedViewDefinitionV2",
+    "KeywordSavedViewFilters",
+    "ListSiteAuditPagesOptions",
+    "MeDeleted",
+    "RegisterDevicePushTokenInput",
+    "SavedViewDefinition",
+    "SavedViewLens",
+    "SavedViewPresentation",
+    "SavedViewReportScope",
+    "SavedViewReportSubject",
+    "SavedViewReportView",
+    "SavedViewSort",
+    "SavedViewSubjectScope",
+    "SearchPerformanceFreshness",
+    "SearchPerformancePeriod",
+    "SearchPerformanceTotalsOptions",
+    "SearchPerformanceTotalsResponse",
+    "SiteAuditPageList",
+    "SiteAuditRunProgress",
 ]

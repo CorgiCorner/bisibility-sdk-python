@@ -91,6 +91,19 @@ class AsyncBisibilityClient(BisibilityClient):
     client owns its underlying ``httpx.AsyncClient``.
     """
 
+    get_domain_verification = _asyncify(BisibilityClient.get_domain_verification)  # type: ignore[assignment]
+    issue_domain_verification = _asyncify(BisibilityClient.issue_domain_verification)  # type: ignore[assignment]
+    check_domain_verification = _asyncify(BisibilityClient.check_domain_verification)  # type: ignore[assignment]
+    get_site_audit_run = _asyncify(BisibilityClient.get_site_audit_run)  # type: ignore[assignment]
+    cancel_site_audit_run = _asyncify(BisibilityClient.cancel_site_audit_run)  # type: ignore[assignment]
+    resume_site_audit_run = _asyncify(BisibilityClient.resume_site_audit_run)  # type: ignore[assignment]
+    list_site_audit_pages = _asyncify(BisibilityClient.list_site_audit_pages)  # type: ignore[assignment]
+    delete_me = _asyncify(BisibilityClient.delete_me)  # type: ignore[assignment]
+    list_device_push_tokens = _asyncify(BisibilityClient.list_device_push_tokens)  # type: ignore[assignment]
+    register_device_push_token = _asyncify(BisibilityClient.register_device_push_token)  # type: ignore[assignment]
+    delete_device_push_token = _asyncify(BisibilityClient.delete_device_push_token)  # type: ignore[assignment]
+    get_search_performance_totals = _asyncify(BisibilityClient.get_search_performance_totals)  # type: ignore[assignment]
+
     def __init__(
         self,
         *,

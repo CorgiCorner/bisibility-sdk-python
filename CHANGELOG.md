@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## 0.20.0 - 2026-11-11
+
+- Add AI Overview filters and report views to saved-view definitions, and support PageSpeed provider operations.
+- Add domain verification, retained site-audit progress and pages, account deletion, device push tokens, and complete search performance totals on synchronous and asynchronous clients.
+- Document `prompt_research` and `challenge_report` as reserved agent-report producer kinds.
+
 ## 0.19.0 - 2026-10-25
 
 - **Breaking:** Rename AI Tracking to Prompt Tracker and AI Visibility to Brand Visibility. Move prompt suggestion methods to Prompt Research.
